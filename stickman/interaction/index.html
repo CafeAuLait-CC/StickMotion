@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>StickMotion</title>
+    <style>
+        canvas {
+            border: 1px solid black;
+        }
+        .container {
+            display: flex;
+            flex-direction: row;
+            gap: 20px;
+        }
+        /* The image container uses a fixed height and adaptive width */
+        #imageDisplay {
+            height: 300px;
+            border: 1px solid black;
+            background-color: #f0f0f0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            /* Use flex layout to center the content */
+            flex-shrink: 0;
+        }
+        /* Ensure the image does not exceed the container while maintaining the original aspect ratio */
+        #imageDisplay img {
+            max-height: 100%;
+            /* Remove fixed width and let the image adjust automatically based on height */
+            /* Optional: Add object-fit property to make the image fit the container better */
+            object-fit: contain;
+        }
+        button.active {
+            background-color: lightblue;
+        }
+    </style>
+</head>
+<body>
+    <h1>StickMotion</h1>
+    <div id="controls">
+        <button id="eraserButton">Eraser</button>
+        <button id="clearButton">Clear</button>
+    </div>
+    <div class="container">
+        <canvas id="canvas" width="300" height="300"></canvas>
+        <div id="imageDisplay">
+            <span>The generated image will be displayed here</span>
+        </div>
+    </div>
+    <div>
+        <button id="submitButton" style="width: 100px; height: 50px; margin-top: 20px;">Generate Image</button>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        let drawing = false;
+        let erasing = false;
+        let isEraserMode = false;
+        let curves = [];
+        let currentCurve = [];
+        let history = [];
+        let historyIndex = -1;
+
+        const clearButton = document.getElementById('clearButton');
+        const submitButton = document.getElementById('submitButton');
+        const eraserButton = document.getElementById('eraserButton');
+        const imageDisplay = document.getElementById('imageDisplay');
+
+        // Event listeners
+        clearButton.addEventListener('click', clearCanvas);
+        submitButton.addEventListener('click', submitData);
+        eraserButton.addEventListener('click', toggleEraser);
+
+        // Initialize history
+        saveToHistory();
+
+        // Canvas events
+        canvas.addEventListener('mousedown', handleMouseDown);
+        canvas.addEventListener('mousemove', handleMouseMove);
+        canvas.addEventListener('mouseup', handleMouseUp);
+        canvas.addEventListener('mouseout', handleMouseOut);
+
+        // Keyboard events
+        document.addEventListener('keydown', handleKeyDown);
+
+        function handleKeyDown(e) {
+            if (e.ctrlKey && e.key.toLowerCase() === 'z') {
+                e.preventDefault();
+                undo();
+            }
+        }
+
+        function handleMouseDown(e) {
+            if (isEraserMode) {
+                erasing = true;
+                eraseAt(getMousePos(e));
+            } else {
+                if (curves.length >= 6) {
+                    alert('You can draw up to 6 curves only');
+                    return;
+                }
+                drawing = true;
+                currentCurve = [getMousePos(e)];
+                ctx.beginPath();
+                ctx.lineWidth = 2;
+                ctx.moveTo(currentCurve[0].x, currentCurve[0].y);
+            }
+        }
+
+        function handleMouseMove(e) {
+            if (isEraserMode && erasing) {
+                eraseAt(getMousePos(e));
+            } else if (drawing) {
+                const pos = getMousePos(e);
+                currentCurve.push(pos);
+                ctx.lineTo(pos.x, pos.y);
+                ctx.stroke();
+            }
+        }
+
+        function handleMouseUp() {
+            if (isEraserMode) {
+                erasing = false;
+            } else if (drawing) {
+                drawing = false;
+                curves.push(currentCurve);
+                saveToHistory();
+                currentCurve = [];
+            }
+        }
+
+        function handleMouseOut() {
+            handleMouseUp();
+        }
+
+        function toggleEraser() {
+            isEraserMode = !isEraserMode;
+            eraserButton.classList.toggle('active', isEraserMode);
+        }
+
+        function getMousePos(e) {
+            const rect = canvas.getBoundingClientRect();
+            return {
+                x: e.clientX - rect.left,
+                y: e.clientY - rect.top
+            };
+        }
+
+        function eraseAt(pos) {
+            const radius = 10;
+            const toDelete = new Set();
+
+            for (let i = 0; i < curves.length; i++) {
+                for (const p of curves[i]) {
+                    const dx = p.x - pos.x;
+                    const dy = p.y - pos.y;
+                    if (dx*dx + dy*dy <= radius*radius) {
+                        toDelete.add(i);
+                        break;
+                    }
+                }
+            }
+
+            if (toDelete.size > 0) {
+                curves = curves.filter((_, i) => !toDelete.has(i));
+                saveToHistory();
+                redrawCanvas();
+            }
+        }
+
+        function saveToHistory() {
+            const snapshot = curves.map(curve => [...curve]);
+            history = history.slice(0, historyIndex + 1);
+            history.push(snapshot);
+            historyIndex++;
+            if (history.length > 20) {
+                history.shift();
+                historyIndex--;
+            }
+        }
+
+        function undo() {
+            if (historyIndex > 0) {
+                historyIndex--;
+                curves = history[historyIndex].map(curve => [...curve]);
+                redrawCanvas();
+            }
+        }
+
+        function clearCanvas() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            curves = [];
+            currentCurve = [];
+            saveToHistory();
+        }
+
+        function redrawCanvas() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            curves.forEach(curve => {
+                ctx.beginPath();
+                ctx.lineWidth = 2;
+                curve.forEach((p, i) => {
+                    if (i === 0) ctx.moveTo(p.x, p.y);
+                    else ctx.lineTo(p.x, p.y);
+                });
+                ctx.stroke();
+            });
+        }
+
+        function submitData() {
+            if (curves.length === 0) {
+                alert('Please draw a stickman first');
+                return;
+            }
+            
+            const data = {
+                stickman: curves
+            };
+            
+            // Show loading state
+            imageDisplay.innerHTML = '<div style="text-align:center">Generating image...</div>';
+            
+            fetch('/submit', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Server response error');
+                }
+                return response.blob();
+            })
+            .then(imageBlob => {
+                const imageUrl = URL.createObjectURL(imageBlob);
+                imageDisplay.innerHTML = `<img src="${imageUrl}" alt="Generated stickman image">`;
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                imageDisplay.innerHTML = '<div style="text-align:center;color:red">Failed to generate image</div>';
+            });
+        }
+    </script>
+</body>
+</html>
