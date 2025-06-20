@@ -59,7 +59,7 @@ class StickmanDataset(Dataset):
         a = 0
         for db_idx in tqdm(idx_range):
             a += 1
-            if a > 100: break ###########################################################################
+            # if a > 100: break ###########################################################################
             data = dataset[db_idx]
             motion_length = data['motion_length'].item()
 
