@@ -5,7 +5,6 @@ __pycache__/
 *.py[cod]
 *$py.class
 **/*.pyc
-my_tools.py
 weight/
 *.lprof
 lightning_logs/
