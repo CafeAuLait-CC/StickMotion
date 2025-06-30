@@ -1,5 +1,5 @@
 # dataset settings
-data_keys = ['motion', 'motion_mask', 'motion_length', 'clip_feat', 'sample_idx', 'text_idx', 'specified_idx', 'stickman_tracks', 'norm_joints'] 
+data_keys = ['motion', 'motion_mask', 'motion_length', 'clip_feat', 'sample_idx', 'text_idx', 'specified_idx', 'stickman_tracks', 'norm_joints', 'locus'] 
 meta_keys = ['text', 'token']
 crop_size = 196
 train_pipeline = [
@@ -14,7 +14,7 @@ train_pipeline = [
 
 data = dict(
     samples_per_gpu=256,
-    workers_per_gpu=20,
+    workers_per_gpu=10,
     train=dict(
         type='RepeatDataset',
         dataset=dict(

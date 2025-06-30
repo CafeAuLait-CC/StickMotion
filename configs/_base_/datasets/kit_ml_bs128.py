@@ -1,9 +1,10 @@
 # dataset settings
-data_keys = ['motion', 'motion_mask', 'motion_length', 'clip_feat', 'sample_idx', 'text_idx', 'specified_idx', 'stickman_tracks', 'norm_joints'] 
+data_keys = ['motion', 'motion_mask', 'motion_length', 'clip_feat', 'sample_idx', 'text_idx',  'stickman_tracks',  'locus', 'stick_mask'] 
 meta_keys = ['text', 'token']
 crop_size = 196
 train_pipeline = [
     dict(type='Crop', crop_size=crop_size),
+    dict(type='StickThing', crop_size=crop_size),
     dict(
         type='Normalize',
         mean_path='data/datasets/kit_ml/mean.npy',
@@ -14,7 +15,7 @@ train_pipeline = [
 
 data = dict(
     samples_per_gpu=256,
-    workers_per_gpu=20,
+    workers_per_gpu=10,
     train=dict(
         type='RepeatDataset',
         dataset=dict(

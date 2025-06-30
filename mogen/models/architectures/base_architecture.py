@@ -113,9 +113,8 @@ class BaseArchitecture(BaseModule):
         output = []
         for i in range(B):
             batch_output = dict()
-            batch_output['specified_idx'] = to_cpu(results['specified_idx'][i])
+            batch_output['stick_mask'] = to_cpu(results['stick_mask'][i])
             batch_output['stickman_tracks'] = to_cpu(results['stickman_tracks'][i])
-            batch_output['pred_index'] = to_cpu(results['pred_index'][i])
             batch_output['motion'] = to_cpu(results['motion'][i])
             batch_output['pred_motion'] = to_cpu(results['pred_motion'][i])
             batch_output['motion_length'] = to_cpu(results['motion_length'][i])
@@ -137,3 +136,18 @@ class BaseArchitecture(BaseModule):
             output.append(batch_output)
         return output
  
+'''
+import numpy as np
+from stickman.eval_with_eye import norm_motion2joint
+
+id = 6
+text = output[id]['text']
+print(text)
+length = output[id]['motion_length']
+motion = output[id]['motion'][:length]
+pred_motion = output[id]['pred_motion'][:length]
+from stickman.eval_with_eye import norm_motion2joint
+# joint = norm_motion2joint(torch.Tensor(motion), 21)
+joint = norm_motion2joint(torch.Tensor(pred_motion), 21)
+np.save('/mnt/new_disk2/wangtao/StickMotion/joint.npy', joint)
+'''

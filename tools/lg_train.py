@@ -1,14 +1,17 @@
 from collections import defaultdict
-import my_tools
 import argparse
 import copy
 import os
+import sys
 import os.path as osp
+workspace_path = osp.abspath(osp.join(__file__, *['..']*2))
+print(f'workspace_path: {workspace_path}')
+os.chdir(workspace_path)
+sys.path.insert(0, workspace_path)
 import time
 
 import shutil
 from pathlib import Path
-import mmcv
 import torch
 from torch.utils.data import DataLoader
 from mmcv import Config, DictAction
@@ -28,6 +31,7 @@ from lightning.pytorch import seed_everything
 from lightning.pytorch.profilers import SimpleProfiler, AdvancedProfiler, PyTorchProfiler
 from lightning.pytorch.callbacks import DeviceStatsMonitor
 from mmcv.parallel import DataContainer
+import my_tools
 
 torch.set_float32_matmul_precision('high')
 
@@ -97,7 +101,7 @@ def main():
         # import my_tools; my_tools.debug()
         workspace = Path.cwd()
         save_dir = Path(logger.log_dir)
-        assert workspace.name == 'ReMoDiffuse'
+        assert workspace.name == 'StickMotion'
         if len([i for i in save_dir.glob('*.ckpt')]):
             raise FileExistsError(f'log already exists')
         if (save_dir / workspace.name).exists():
@@ -138,8 +142,8 @@ def main():
     trainer = Trainer(accelerator="gpu", 
                       strategy=DDPStrategy(),
                     #   devices=[0],
-                      devices=[6,7],
-                    #   devices=parse_gpu(args.gpu),
+                    #   devices=[6,7],
+                      devices=parse_gpu(args.gpu),
                     #   max_steps=30,
                     #   max_epochs=1,
                       max_epochs=cfg.runner.max_epochs,
@@ -150,7 +154,7 @@ def main():
                       callbacks=[
                           checkpoint_callback,
                           lr_monitor,
-                        #   UnParaCallback(),
+                          UnParaCallback(),
                         #   DeviceStatsMonitor(cpu_stats=True),   
                           ],
                     #   profiler=advanced_profiler,
@@ -161,5 +165,5 @@ def main():
 if __name__ == '__main__':
     main()
 
-# python tools/lg_train.py configs/remodiffuse/remodiffuse_kit.py  debug -2
+# python tools/lg_train.py configs/remodiffuse/remodiffuse_kit.py  tp_init -1
 # po 5 python tools/lg_train.py  configs/remodiffuse/remodiffuse_t2m.py  user_0608 -1

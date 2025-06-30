@@ -10,6 +10,40 @@ from typing import Optional, Tuple, Union
 
 
 @PIPELINES.register_module()
+class StickThing(object):
+    r"""Crop motion sequences.
+    
+    Args:
+        crop_size (int): The size of the cropped motion sequence.
+    """
+    def __init__(self,
+                 crop_size: Optional[Union[int, None]] = None):
+        self.crop_size = crop_size
+        assert self.crop_size is not None
+        
+    def __call__(self, results):
+        specified_idx = results['specified_idx']
+        _stickman_tracks = results['stickman_tracks']
+        _locus = results['locus'][:self.crop_size]
+        stick_len = len(specified_idx)
+        stick_mask = np.zeros((self.crop_size,1))
+        stick_mask[specified_idx] = 1
+        stickman_tracks = np.zeros((self.crop_size, 6, 64, 2), dtype=np.float16)
+        locus = np.zeros((self.crop_size, 2), dtype=np.float16)
+        if stick_len != 0:
+            stickman_tracks[specified_idx] = _stickman_tracks
+        locus[:len(_locus)] = _locus
+        results['stickman_tracks'] = stickman_tracks
+        results['locus'] = locus
+        results['stick_mask'] = stick_mask
+        return results
+        
+        
+    def __repr__(self):
+        repr_str = self.__class__.__name__ + f'(crop_size={self.crop_size})'
+        return repr_str
+
+@PIPELINES.register_module()
 class Crop(object):
     r"""Crop motion sequences.
     

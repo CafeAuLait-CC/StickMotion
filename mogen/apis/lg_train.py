@@ -23,6 +23,17 @@ class LgModel(LightningModule):
     def on_train_epoch_start(self) -> None:
         self.model.others_cuda()
 
+        torch.cuda.empty_cache()
+        device = self.device
+        free_memory, total_memory = torch.cuda.mem_get_info(device)
+        dtype = torch.uint8
+        element_size = torch.tensor([], dtype=dtype, device=device).element_size()
+        num_elements = int((free_memory // element_size) * 0.95)
+        try:
+            empty_tensor = torch.empty(num_elements, dtype=dtype, device=device)
+        except RuntimeError as e:
+            pass
+        return super().on_train_epoch_start()
     
 
     def on_validation_start(self) -> None:
@@ -79,11 +90,11 @@ def evalute_sim(results, joints_num):
     for result in results:
         length = result['motion_length'].item()
         gt_motion = result['motion'][:,4:3*joints_num+4]
-        index = result['specified_idx']
+        index = (result['stick_mask'] == 1).nonzero()[:,0]
         gt_stick_motion = gt_motion[index]
         
         pred_motion = result['pred_motion'][:,4:3*joints_num+4]
-        pred_index = result['pred_index']
+        pred_index = index
         pred_id = pred_index.max(0)[1]
         pred_stcik_motion = pred_motion[pred_id].double()
         
@@ -99,7 +110,7 @@ def evalute_mean(results,joints_num):
     for result in results:
         length = result['motion_length'].item()
         gt_motion = result['motion'][:,4:3*joints_num+4]
-        index = result['specified_idx']
+        index = (result['stick_mask'] == 1).nonzero()[:,0]
         gt_stick_motion = gt_motion[index]
         
         pred_motion = result['pred_motion'][:,4:3*joints_num+4]
