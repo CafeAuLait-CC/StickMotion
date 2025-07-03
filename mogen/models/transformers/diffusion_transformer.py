@@ -97,39 +97,7 @@ class DecoderLayer(nn.Module):
             x = self.ffn(**kwargs)
         return x
 
-class LocusEncoder(nn.Module):
-    def __init__(self, input_dim=2, len=196, latent_dim=10):
-        super().__init__()
-        self.input_dim = input_dim
-        self.latent_dim = latent_dim
-        self.len = len
-        self.single_embed = nn.Sequential(
-            nn.Linear(input_dim, latent_dim),
-            nn.SiLU(),
-            nn.Linear(latent_dim, latent_dim)
-        )
-        self.inter_embed = nn.Sequential(
-            nn.Conv1d(latent_dim, latent_dim, kernel_size=3, padding=1),
-            nn.SiLU(),
-            nn.Conv1d(latent_dim, latent_dim*2, kernel_size=3, padding=1),
-            nn.SiLU(),
-            nn.Conv1d(latent_dim*2, latent_dim*2, kernel_size=3, padding=1),
-            nn.SiLU(),
-            nn.Conv1d(latent_dim*2, latent_dim, kernel_size=3, padding=1),
-            nn.SiLU()
-        )
-                
 
-    def forward(self, x):
-        """
-        x: B, T, 2 -> B, (T, latent_dim) -> B, T, latent_dim
-        """
-        x = self.single_embed(x)  # B, T, latent_dim
-        # x = rearrange(x, 'b t d -> b (t d)')  # B, T*latent_dim
-        x = x.permute(0, 2, 1)  # B, latent_dim, T
-        x = self.inter_embed(x)  # B, latent_dim, T
-        x = x.permute(0, 2, 1)  # B, T, latent_dim
-        return x
         
 
 class DiffusionTransformer(BaseModule, metaclass=ABCMeta):
@@ -153,6 +121,7 @@ class DiffusionTransformer(BaseModule, metaclass=ABCMeta):
         self.num_layers = num_layers
         self.time_embed_dim = time_embed_dim
         self.sequence_embedding = nn.Parameter(torch.randn(max_seq_len, latent_dim))
+        self.register_buffer('len_pos', torch.arange(max_seq_len, dtype=torch.float32, device=self.sequence_embedding.device))
         self.index_num = int(index_num)
         
         self.use_cache_for_text = use_cache_for_text
@@ -161,10 +130,9 @@ class DiffusionTransformer(BaseModule, metaclass=ABCMeta):
         self.build_text_encoder(text_encoder)
 
         # Input Embedding
-        self.locus_encoder = LocusEncoder(input_dim=2, len=max_seq_len, latent_dim=10)
-        self.joint_embed = nn.Linear(self.input_feats, self.latent_dim-11)
-        self.joint_infor_embed = nn.Sequential(
-            nn.Linear(self.latent_dim, self.latent_dim),
+        # self.joint_embed = nn.Linear(self.input_feats, self.latent_dim-11)
+        self.joint_embed = nn.Sequential(
+            nn.Linear(self.input_feats, self.latent_dim),
             nn.SiLU(),
             nn.Linear(self.latent_dim, self.latent_dim),
         )
@@ -269,7 +237,7 @@ class DiffusionTransformer(BaseModule, metaclass=ABCMeta):
     def forward_test(self, h, src_mask, emb, **kwargs):
         pass
 
-    def forward(self, motion, timesteps, motion_mask=None, motion_length=None, **kwargs):
+    def forward(self, motion, timesteps, motion_mask=None,  **kwargs):
         """
         motion: B, T, D
         """
@@ -285,16 +253,10 @@ class DiffusionTransformer(BaseModule, metaclass=ABCMeta):
         else:
             emb = self.time_embed(timestep_embedding(timesteps, self.latent_dim))
         # B, T, latent_dim
-        locus = kwargs['locus']
         h = self.joint_embed(motion)
-        motion_length_expanded = motion_length[:, None].expand(-1, h.size(1), -1) / 100 - 1
-        locus = locus/10
-        # locus[:,:,0] = locus[:,:,0] / 2
-        # locus[:,:,1] = locus[:,:,1] * 2
-        locus_emb = self.locus_encoder(locus)
-        h = torch.concat([h, motion_length_expanded, locus_emb], dim=-1).contiguous()
-        h = self.joint_infor_embed(h)  # B, T, latent_dim
-        h = h + self.sequence_embedding.unsqueeze(0)[:, :T, :] # position encoding of the frame
+        pos_emb = self.sequence_embedding.unsqueeze(0)[:, :T, :] # position encoding of the frame
+        h = h + pos_emb
+        conditions['stickman_emb'] = conditions['stickman_emb'] + pos_emb
 
         if self.training:
             return self.forward_train(h=h, src_mask=src_mask, emb=emb, timesteps=timesteps, stick_mask=kwargs['stick_mask'], **conditions)

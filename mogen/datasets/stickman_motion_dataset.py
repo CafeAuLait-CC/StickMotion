@@ -118,7 +118,8 @@ class Stickmant2mDataset(BaseMotionDataset):
         else:
             results['specified_idx'] = random_select_stickman(length=length)
         ori_joints = recover_from_ric(torch.Tensor(results['motion']), self.joint_num).cpu().numpy()
-        locus = self.sticklocus(ori_joints)
+        # locus = self.sticklocus(ori_joints)
+        locus = ori_joints.copy()[:, 0, [0,2]] #*(-2) # [t, 2]
         joints = ori_joints[results['specified_idx'], :, :]
         tracks = []
         norm_joints = []

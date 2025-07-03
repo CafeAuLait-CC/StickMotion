@@ -33,6 +33,7 @@ class StickThing(object):
         if stick_len != 0:
             stickman_tracks[specified_idx] = _stickman_tracks
         locus[:len(_locus)] = _locus
+        locus[len(_locus):] = _locus[-1]
         results['stickman_tracks'] = stickman_tracks
         results['locus'] = locus
         results['stick_mask'] = stick_mask

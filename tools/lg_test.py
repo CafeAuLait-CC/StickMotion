@@ -100,6 +100,6 @@ def main():
 if __name__ == '__main__':
     main()
 
-# python tools/lg_test.py logs/kit_ml//last.ckpt -1
+# python tools/lg_test.py /mnt/new_disk2/wangtao/StickMotion/logs/kit_ml/tp_locus_fix/last.ckpt -1
 
 # python tools/lg_test.py /mnt/new_disk2/wangtao/StickMotion/logs/kit_ml/tp_init/last.ckpt 2

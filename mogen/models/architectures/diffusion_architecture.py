@@ -122,17 +122,27 @@ class MotionDiffusion(BaseArchitecture):
                     'clip_feat': clip_feat,
                     'sample_idx': sample_idx}
             )
-            pred, target = output['pred'], output['target']
-            recon_loss = self.loss_recon(pred, target, reduction_override='none')
-            recon_loss = (recon_loss.mean(dim=-1) * motion_mask).sum() / motion_mask.sum()
-            loss = {'all_loss': recon_loss}
+            all_loss = 0
+            pred, target,  p_batch, stick_mask = output['pred'], output['target'],  output['p_batch'], output['stick_mask']
+            loss = {}
+            all_loss_batch = self.loss_recon(pred, target, reduction_override='none') # [B, T, M]
+            
+            loss_item = ['text_loss', 'both_loss', 'stick_loss', 'none_loss']
+            assert len(p_batch) == len(loss_item)
+            all_batch = sum(p_batch)
+            start = 0
+            for i, batch in enumerate(p_batch):
+                loss[loss_item[i]] = \
+                (all_loss_batch[start:start+batch].mean(-1) * \
+                motion_mask[start:start+batch]).sum() /\
+                motion_mask[start:start+batch].sum()
+                all_loss = all_loss + batch/all_batch * loss[loss_item[i]]
+                start += batch
+            loss['all_loss'] = all_loss
             return loss
         else:
             dim_pose = kwargs['motion'].shape[-1]
             model_kwargs = self.model.get_precompute_condition(device=motion.device,  **kwargs)
-            # model_kwargs['motion_mask'] = motion_mask
-            # model_kwargs['sample_idx'] = sample_idx
-            # model_kwargs['motion_length'] = kwargs['motion_length']
             model_kwargs={
                 'motion_mask': motion_mask,
                 'motion_length': motion_length,

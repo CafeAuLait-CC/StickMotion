@@ -107,11 +107,13 @@ class SemanticsModulatedAttention(nn.Module):
                        stick_latent_dim,
                        num_heads,
                        dropout,
+                       locus_dim,
                        time_embed_dim):
         super().__init__()
         self.num_heads = num_heads
         self.norm = nn.LayerNorm(latent_dim)
         self.query = nn.Linear(latent_dim, latent_dim)
+        self.query_locus = nn.Linear(locus_dim, latent_dim)
         self.text_encoder = SubAttention(latent_dim, text_latent_dim, num_heads)
         self.stick_encoder = SubAttention(latent_dim, stick_latent_dim, num_heads)
         self.y_encoder = SelfAttention(latent_dim, num_heads)
@@ -124,7 +126,7 @@ class SemanticsModulatedAttention(nn.Module):
         self.proj_out = StylizationBlock(latent_dim, time_embed_dim, dropout)
     # from line_profiler import profile
     # @profile
-    def forward(self, x, text_emb, stick_emb, other_emb, src_mask, cond_type, stick_mask):
+    def forward(self, x, text_emb, stick_emb, other_emb, src_mask, cond_type, stick_mask, locus_emb):
         """
         x: B, T, D
         xf: B, N, L # text features; re_dict: retrieval information
@@ -141,6 +143,9 @@ class SemanticsModulatedAttention(nn.Module):
         text_emb = text_emb[:ci[2]]
 
         stick_query = query[ci[1]:ci[3]]
+        locus_emb = locus_emb[ci[1]:ci[3]]
+        # stick_query = self.query_locus(torch.cat((stick_query, locus_emb), dim=-1))
+        stick_query = stick_query + self.query_locus(locus_emb)
         stick_x = x[ci[1]:ci[3]]
         stick_x_mask = src_mask[ci[1]:ci[3]]
         stick_emb = stick_emb[ci[1]:ci[3]]
@@ -148,10 +153,17 @@ class SemanticsModulatedAttention(nn.Module):
         
         text_y = self.text_encoder(text_query, text_x, text_emb, text_x_mask, 1)
         stick_y = self.stick_encoder(stick_query, stick_x, stick_emb, stick_x_mask, stick_mask)
+
         query[:ci[2]] = query[:ci[2]] + text_y
         query[ci[1]:ci[3]] = query[ci[1]:ci[3]] + stick_y
+
+        # additional_emb = torch.zeros_like(query)
+        # additional_emb[:ci[2]] = additional_emb[:ci[2]] + text_y
+        # additional_emb[ci[1]:ci[3]] = additional_emb[ci[1]:ci[3]] + stick_y
+        # additional_emb[ci[1]:ci[2]] = additional_emb[ci[1]:ci[2]]/2
+        # query = query + additional_emb
+
         query = self.y_encoder(query, x, src_mask)
-        
         y = x + self.proj_out(query, other_emb)
 
 

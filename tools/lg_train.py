@@ -154,7 +154,7 @@ def main():
                       callbacks=[
                           checkpoint_callback,
                           lr_monitor,
-                          UnParaCallback(),
+                        #   UnParaCallback(),
                         #   DeviceStatsMonitor(cpu_stats=True),   
                           ],
                     #   profiler=advanced_profiler,

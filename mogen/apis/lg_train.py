@@ -7,6 +7,7 @@ import pickle
 from lightning.fabric.fabric import Fabric
 import os
 import time
+from mogen.utils.plot_utils import recover_from_ric
 
 class LgModel(LightningModule):
 
@@ -79,10 +80,26 @@ class LgModel(LightningModule):
                 ordered_results.extend(list(res))
             ordered_results = ordered_results[:len(self.dataset)]
             print(f'StiSim:{1-evalute_sim(ordered_results, joints_num=21)/evalute_mean(ordered_results, joints_num=21)}')
+            print(f'LoDist:{evalute_locus(ordered_results, joints_num=21)}')
             results = self.dataset.evaluate(ordered_results)
             for k, v in results.items():
                 print(f'\n{k} : {v:.4f}')
 
+
+def evalute_locus(results, joints_num):
+    
+    dis_list = []
+    for result in results:
+        length = result['motion_length'].item()
+        gt_motion = result['motion'][:length]
+        pred_motion = result['pred_motion'][:length]
+        gt_joint = recover_from_ric(gt_motion, joints_num=joints_num)
+        pred_joint = recover_from_ric(pred_motion, joints_num=joints_num) 
+        gt_locus = gt_joint[:,0,[0,2]]
+        pred_locus = pred_joint[:,0,[0,2]]
+        dist = (pred_locus - gt_locus).pow(2).sum(-1).mean()
+        dis_list.append(dist.item())
+    return sum(dis_list)/len(dis_list)/1000
 
 def evalute_sim(results, joints_num):
     
@@ -94,9 +111,7 @@ def evalute_sim(results, joints_num):
         gt_stick_motion = gt_motion[index]
         
         pred_motion = result['pred_motion'][:,4:3*joints_num+4]
-        pred_index = index
-        pred_id = pred_index.max(0)[1]
-        pred_stcik_motion = pred_motion[pred_id].double()
+        pred_stcik_motion = pred_motion[index].double()
         
         dist = (pred_stcik_motion - gt_stick_motion).view(-1,joints_num,3).pow(2).sum(-1).mean()
         
