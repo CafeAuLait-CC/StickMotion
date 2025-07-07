@@ -13,6 +13,10 @@ from matplotlib.animation import FuncAnimation, FFMpegFileWriter
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import mpl_toolkits.mplot3d.axes3d as p3
 
+mean_kit = torch.tensor(np.load('data/datasets/kit_ml/mean.npy'))
+std_kit = torch.tensor(np.load('data/datasets/kit_ml/std.npy'))
+mean_t2m = torch.tensor(np.load('data/datasets/human_ml3d/mean.npy'))
+std_t2m = torch.tensor(np.load('data/datasets/human_ml3d/std.npy'))
 # Define a kinematic tree for the skeletal struture
 kit_kinematic_chain = [[0, 11, 12, 13, 14, 15], [0, 16, 17, 18, 19, 20], [0, 1, 2, 3, 4], [3, 5, 6, 7], [3, 8, 9, 10]]
 t2m_kinematic_chain = [[0, 2, 5, 8, 11], [0, 1, 4, 7, 10], [0, 3, 6, 9, 12, 15], [9, 14, 17, 19, 21], [9, 13, 16, 18, 20]]
@@ -71,9 +75,21 @@ def recover_root_rot_pos(data): #[b,T,D]
     return r_rot_quat.to(data.dtype), r_pos.to(data.dtype)
 
 
-def recover_from_ric(data, joints_num):
-    r_rot_quat, r_pos = recover_root_rot_pos(data)
-    positions = data[..., 4:(joints_num - 1) * 3 + 4]
+def recover_from_ric(data, joints_num, ifnorm=False):
+    if ifnorm:
+        if joints_num == 21:
+            mean = mean_kit
+            std = std_kit
+        if joints_num == 22:
+            mean = mean_t2m
+            std = std_t2m
+        mean = mean[(None,) * (len(data.shape)-1) + (...,)].to(data.device).to(data.dtype)
+        std = std[(None,) * (len(data.shape)-1) + (...,)].to(data.device).to(data.dtype)
+        data1 = data.clone() * std + mean
+    else:
+        data1 = data
+    r_rot_quat, r_pos = recover_root_rot_pos(data1)
+    positions = data1[..., 4:(joints_num - 1) * 3 + 4]
     positions = positions.view(positions.shape[:-1] + (-1, 3))
 
     '''Add Y-axis rotation to local joints'''

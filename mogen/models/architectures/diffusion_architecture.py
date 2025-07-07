@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from mmcv.runner import auto_fp16
+
+from mogen.utils.plot_utils import recover_from_ric
 from .base_architecture import BaseArchitecture
 from ..builder import (
     ARCHITECTURES,
@@ -124,6 +126,7 @@ class MotionDiffusion(BaseArchitecture):
             )
             all_loss = 0
             pred, target,  p_batch, stick_mask = output['pred'], output['target'],  output['p_batch'], output['stick_mask']
+            motion_length = kwargs['motion_length'][:,0]
             loss = {}
             all_loss_batch = self.loss_recon(pred, target, reduction_override='none') # [B, T, M]
             
@@ -131,7 +134,33 @@ class MotionDiffusion(BaseArchitecture):
             assert len(p_batch) == len(loss_item)
             all_batch = sum(p_batch)
             start = 0
+            
+            joints_num = 21 if motion.shape[-1] == 251 else 22
             for i, batch in enumerate(p_batch):
+                if loss_item[i] in {'both_loss', 'stick_loss'}:
+
+                    # stickman
+                    mask_s = stick_mask[start:start+batch].squeeze(-1) # [B, T]
+                    gt_m = motion[start:start+batch, :, self.motion_start:self.motion_end] # [B, T, M] 
+                    pred_m = pred[start:start+batch, :, self.motion_start:self.motion_end]
+                    stickman_diff = (gt_m - pred_m).pow(2).mean(-1) # [B, T]
+                    stickman_loss = (stickman_diff * mask_s).sum(-1) / (0.1 + mask_s.sum(-1))# [B]
+                    stickman_loss = stickman_loss.mean() # [1]
+                    loss[f'stickman_{loss_item[i]}'] = stickman_loss
+                    
+                    # locus
+                    pred_joint = recover_from_ric(pred[start:start+batch], joints_num=joints_num, ifnorm=True) # [B, T, J, 3]
+                    pred_locus = pred_joint[:, :, 0, [0,2]]/1000 # [B, T, 2]
+                    gt_locus = locus[start:start+batch]/1000 # [B, T, 2]
+                    locus_diff = (gt_locus - pred_locus).pow(2).mean(-1) # [B, T]
+                    mask_l = motion_mask[start:start+batch] # [B, T]
+                    locus_loss = (locus_diff * mask_l).sum(-1) / (1 + mask_l.sum(-1)) # [B]
+                    locus_loss = locus_loss.mean() # [1]
+                    loss[f'locus_{loss_item[i]}'] = locus_loss
+
+                    all_loss = all_loss + (batch / all_batch) * \
+                        (stickman_loss * self.loss_weight.stickman_w + \
+                         locus_loss * self.loss_weight.locus_w)
                 loss[loss_item[i]] = \
                 (all_loss_batch[start:start+batch].mean(-1) * \
                 motion_mask[start:start+batch]).sum() /\

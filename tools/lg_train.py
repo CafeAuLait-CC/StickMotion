@@ -159,6 +159,7 @@ def main():
                           ],
                     #   profiler=advanced_profiler,
                       )     
+    # model.load_state_dict(torch.load('/mnt/new_disk2/wangtao/StickMotion/logs/kit_ml/tp_loss2/last.ckpt', map_location='cpu')['state_dict']) 
     trainer.fit(model, train_loader)
 
 

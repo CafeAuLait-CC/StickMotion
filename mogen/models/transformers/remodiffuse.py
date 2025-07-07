@@ -304,7 +304,7 @@ class LocusEncoder(nn.Module):
             nn.Conv1d(latent_dim, latent_dim*2, kernel_size=3, padding=1),
             nn.LeakyReLU(),
             *[nn.Conv1d(latent_dim*2, latent_dim*2, kernel_size=3, padding=1),
-            nn.LeakyReLU()] * 3,
+            nn.LeakyReLU()] * 6,
             nn.Conv1d(latent_dim*2, latent_dim, kernel_size=1, padding=0),
         )
                 
@@ -443,7 +443,7 @@ class ReMoDiffuseTransformer(DiffusionTransformer):
         if locus_emb is None:
             motion_length_x = torch.cat([motion_length[:,None].expand(-1, T, 1), self.len_pos[None,:T,None].expand(B, -1, -1)], dim=-1)
             motion_length_x = motion_length_x/100 - 1  # B, T, 2
-            locus_x = locus/100 # B, T, 2
+            locus_x = locus/100 # *(-1) # B, T, 2
             locus_x = torch.cat([locus_x, motion_length_x], dim=-1) # B, T, 4
             locus_emb = self.encode_locus(locus_x)  # B, T, latent_dim
         output['locus_emb'] = locus_emb

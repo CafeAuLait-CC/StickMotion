@@ -114,7 +114,7 @@ class Stickmant2mDataset(BaseMotionDataset):
         # stickman
         length = min(len(results['motion']), self.crop_size)
         if self.test_mode:
-            results['specified_idx'] = [int(p*length) for p in [0.2,0.5,0.8]]
+            results['specified_idx'] = [int(p*length) for p in [0.125,0.5,0.875]]
         else:
             results['specified_idx'] = random_select_stickman(length=length)
         ori_joints = recover_from_ric(torch.Tensor(results['motion']), self.joint_num).cpu().numpy()

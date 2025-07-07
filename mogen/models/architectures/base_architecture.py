@@ -138,8 +138,6 @@ class BaseArchitecture(BaseModule):
  
 '''
 import numpy as np
-from stickman.eval_with_eye import norm_motion2joint
-
 id = 6
 text = output[id]['text']
 print(text)

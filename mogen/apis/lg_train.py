@@ -93,11 +93,11 @@ def evalute_locus(results, joints_num):
         length = result['motion_length'].item()
         gt_motion = result['motion'][:length]
         pred_motion = result['pred_motion'][:length]
-        gt_joint = recover_from_ric(gt_motion, joints_num=joints_num)
-        pred_joint = recover_from_ric(pred_motion, joints_num=joints_num) 
+        gt_joint = recover_from_ric(gt_motion, joints_num=joints_num, ifnorm=True)
+        pred_joint = recover_from_ric(pred_motion, joints_num=joints_num, ifnorm=True) 
         gt_locus = gt_joint[:,0,[0,2]]
         pred_locus = pred_joint[:,0,[0,2]]
-        dist = (pred_locus - gt_locus).pow(2).sum(-1).mean()
+        dist = (pred_locus - gt_locus).pow(2).sum(-1).sqrt().mean()
         dis_list.append(dist.item())
     return sum(dis_list)/len(dis_list)/1000
 

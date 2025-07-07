@@ -87,11 +87,11 @@ model = dict(
     loss_weight=dict(
         # motion_w=0,
         # index_w=0
-        motion_w=1.0,
-        index_w=0.1
+        stickman_w=1.0,
+        locus_w=1.0,
     ),
     index_num=index_num,
-    motion_crop=[4, 21*3+4],
+    motion_crop=[4, 4+20*9],
     model=dict(
         type='ReMoDiffuseTransformer',
         input_feats=input_feats,
