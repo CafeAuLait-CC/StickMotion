@@ -97,7 +97,7 @@ def main():
         # import my_tools; my_tools.debug()
         workspace = Path.cwd()
         save_dir = Path(logger.log_dir)
-        assert workspace.name == 'ReMoDiffuse'
+        assert workspace.name == 'StickMotion'
         if len([i for i in save_dir.glob('*.ckpt')]):
             raise FileExistsError(f'log already exists')
         if (save_dir / workspace.name).exists():
@@ -138,8 +138,8 @@ def main():
     trainer = Trainer(accelerator="gpu", 
                       strategy=DDPStrategy(),
                     #   devices=[0],
-                      devices=[6,7],
-                    #   devices=parse_gpu(args.gpu),
+                    #   devices=[6,7],
+                      devices=parse_gpu(args.gpu),
                     #   max_steps=30,
                     #   max_epochs=1,
                       max_epochs=cfg.runner.max_epochs,
