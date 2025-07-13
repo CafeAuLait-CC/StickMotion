@@ -1,5 +1,10 @@
 import os
 from os.path import join as pjoin
+import sys
+workspace_path = os.path.abspath(os.path.join(__file__, *['..']*2))
+print(f"Workspace path: {workspace_path}")
+os.chdir(workspace_path)
+sys.path.insert(0, workspace_path)
 import torch
 import torch.distributed as dist
 from torch.utils.data import DataLoader, Subset
@@ -114,11 +119,12 @@ class StickModel(LightningModule):
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
-    # parser.add_argument('config', type=str)
+    parser.add_argument('config', type=str)
     parser.add_argument('version', nargs='?', default='debug', help='Set version')
     args = parser.parse_args()
     # cfg_file = "configs/remodiffuse/remodiffuse_kit.py"
-    cfg_file = "configs/remodiffuse/remodiffuse_t2m.py"
+    cfg_file = args.config
+    # cfg_file = "configs/remodiffuse/remodiffuse_t2m.py"
     cfg = Config.fromfile(cfg_file)
     train_ratio = 0.8
     train_dataset = StickmanDataset(cfg, train=True, train_ratio=train_ratio)
@@ -157,7 +163,7 @@ if __name__ == '__main__':
                       strategy=DDPStrategy(),
                       check_val_every_n_epoch=1,
                     #   devices=[1,2],
-                      devices=[7],
+                      devices=[0],
                     #   max_epochs=1,
                     #   max_steps=7,
                       max_epochs=epochs,
@@ -172,8 +178,10 @@ if __name__ == '__main__':
                           ]
                       )     
     
-    # trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=val_loader)
+    trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=val_loader)
 
-    path = "stickman/logs/human_ml3d/fix_init/last.ckpt"
-    model = StickModel.load_from_checkpoint(path, cfg=cfg)
-    trainer.validate(model, dataloaders=val_loader)
+    # path = "stickman/logs/human_ml3d/fix_init/last.ckpt"
+    # model = StickModel.load_from_checkpoint(path, cfg=cfg)
+    # trainer.validate(model, dataloaders=val_loader)
+
+    # python stickman/runner.py configs/remodiffuse/remodiffuse_kit.py debug

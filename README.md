@@ -80,6 +80,18 @@ StickMotion
 ## Getting Started
 Let's take the KIT-ML dataset as an example.
 
+###  Training the Stickman Encoder (optional, the pretrained weight is provided)
+```
+python stickman/runner.py configs/remodiffuse/remodiffuse_kit.py VERSION_NAME
+
+# the logs and weights will be saved in stickman/logs/kit_ml/VERSION_NAME
+# then pick up the stickman encoder weights from the logs after training
+
+python stickman/split_weight.py --weight_path stickman/logs/kit_ml/VERSION_NAME/last.ckpt --save_path stickman/weight/kit_ml
+
+# If you want to use it in the training of StickMotion, specify the weight path to configs/remodiffuse/remodiffuse_kit.py line 132
+```
+
 
 ### Stickman-to-Pose Visualization
 
@@ -104,4 +116,10 @@ python tools/lg_train.py configs/remodiffuse/remodiffuse_kit.py  VERSION_NAME 0
 # arg2: VERSION_NAME, which will be used to save the model, logs, and codes
 # arg3: gpu id
 ```
+
+### More Details
+- Stickman Generation Algorithm (SGA): stickman/utils.py Class Stickman 
+- SGA in StickMotion training: mogen/datasets/stickman_motion_dataset.py
+- Multi-Condition Module: /mnt/new_disk2/wangtao/StickMotion/mogen/models/attentions/semantics_modulated.py
+- Dynamic Supervision: mogen/models/architectures/diffusion_architecture.py line 128
 
