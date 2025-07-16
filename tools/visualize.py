@@ -47,6 +47,9 @@ def parse_args():
     parser.add_argument('--motion_length', type=int, help='expected motion length')
     parser.add_argument('--out', help='output animation file')
     parser.add_argument('--pose_npy', help='output pose sequence file', default=None)
+    parser.add_argument('--stickman_path', help='path to stickman track npy file', default=None)
+    parser.add_argument('--specified_idx', type=int, nargs='+', default=None,
+                        help='indices of frames corresponding to each stickman track')
     parser.add_argument(
         '--launcher',
         choices=['none', 'pytorch', 'slurm', 'mpi'],
@@ -111,22 +114,36 @@ def main():
         std = np.load(std_path)
          
     device = args.device
-    text = args.text
+    text = args.text if args.text is not None else ''
     motion_length = args.motion_length
     if dataset_name == 'human_ml3d':
         motion = torch.zeros(1, motion_length, 263).to(device)
     else:
         motion = torch.zeros(1, motion_length, 251).to(device)
     motion_mask = torch.ones(1, motion_length).to(device)
-    motion_length = torch.Tensor([motion_length]).long().to(device)
+    motion_length_tensor = torch.Tensor([motion_length]).long().to(device)
     model = model.to(device)
     model.module.others_cuda()
+
+    if args.stickman_path is not None:
+        tracks_np = np.load(args.stickman_path)
+        stickman_tracks = torch.from_numpy(tracks_np).float().unsqueeze(0).to(device)
+        if args.specified_idx is None:
+            raise ValueError('--specified_idx must be provided with --stickman_path')
+        specified_idx = torch.tensor(args.specified_idx, dtype=torch.long).unsqueeze(0).to(device)
+    else:
+        index_num = cfg.model.index_num
+        stickman_tracks = torch.zeros(1, index_num, 6, 64, 2).to(device)
+        mid = motion_length // 2
+        specified_idx = torch.tensor([0, mid, motion_length-1], dtype=torch.long).unsqueeze(0).to(device)
     
     input = {
         'motion': motion,
         'motion_mask': motion_mask,
-        'motion_length': motion_length,
+        'motion_length': motion_length_tensor,
         'motion_metas': [{'text': text}],
+        'stickman_tracks': stickman_tracks,
+        'specified_idx': specified_idx,
     }
 
     all_pred_motion = []
@@ -224,14 +241,4 @@ class VisMy():
     
 
 if __name__ == '__main__':
-    # main()
-    vismy = VisMy('kit_ml')
-    import pickle
-    result = pickle.load(open('res.pkl', 'rb'))
-    index = 0
-    res = result[index]
-    track_list = res['stickman_tracks']
-    motion = res['pred_motion']
-    pred_index = res['pred_index'][-1]
-
-# export CUDA_VISIBLE_DEVICES=4; gopy tools/visualize.py     configs/remodiffuse/remodiffuse_t2m.py     logs/remodiffuse/remodiffuse_t2m/latest.pth     --text "a person is running quickly"     --motion_length 120     --out "test.gif"     --device cuda
+    main()
