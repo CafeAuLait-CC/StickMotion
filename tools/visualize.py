@@ -8,6 +8,19 @@ import torch
 from mogen.models import build_architecture
 from mmcv.runner import load_checkpoint
 from mmcv.parallel import MMDataParallel
+
+
+def load_ckpt(model, ckpt_path, map_location='cpu'):
+    """Load checkpoint for both .pth and lightning .ckpt files."""
+    ckpt_path = os.path.abspath(ckpt_path)
+    if not os.path.exists(ckpt_path):
+        raise FileNotFoundError(f'Cannot find checkpoint: {ckpt_path}')
+    if ckpt_path.endswith('.ckpt'):
+        ckpt = torch.load(ckpt_path, map_location=map_location)
+        state_dict = ckpt.get('state_dict', ckpt)
+        model.load_state_dict(state_dict)
+    else:
+        load_checkpoint(model, ckpt_path, map_location=map_location)
 from mogen.utils.plot_utils import (
     recover_from_ric,
     plot_3d_motion,
@@ -90,7 +103,7 @@ def main():
     fp16_cfg = cfg.get('fp16', None)
     if fp16_cfg is not None:
         wrap_fp16_model(model)
-    load_checkpoint(model, args.checkpoint, map_location='cpu')
+    load_ckpt(model, args.checkpoint, map_location='cpu')
 
     if args.device == 'cpu':
         model = model.cpu()
