@@ -1,4 +1,5 @@
 from os.path import join as pjoin
+import os
 import torch
 import torch.distributed as dist
 from torch.utils.data import DataLoader, Subset
@@ -122,11 +123,18 @@ class StickModel(LightningModule):
             self.log(f'val_{k}', v, on_step=False, on_epoch=True, prog_bar=False, logger=True, sync_dist=True)
         self.log('val_loss', loss, on_step=False, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
 
-def get_pose_model(cfg_path='configs/remodiffuse/remodiffuse_kit.py', weight_path='stickman/logs/kit_ml/fix_init/last.ckpt', device='cuda'):
+def get_pose_model(
+    cfg_path='configs/remodiffuse/remodiffuse_kit.py',
+    weight_path='stickman/logs/kit_ml/fix_init/last.ckpt',
+    device='cuda'):
     cfg = Config.fromfile(cfg_path)
     cfg = cfg.stick_set
-    model = StickModel(cfg)
-    model = StickModel.load_from_checkpoint(weight_path, map_location=device, cfg=cfg)
+
+    ckpt = os.path.abspath(weight_path)
+    if not os.path.exists(ckpt):
+        raise FileNotFoundError(f'checkpoint not found: {ckpt}')
+
+    model = StickModel.load_from_checkpoint(ckpt, map_location=device, cfg=cfg)
     model.to(device)
     model.eval()
     

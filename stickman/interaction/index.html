@@ -41,6 +41,13 @@
         <button id="eraserButton">Eraser</button>
         <button id="clearButton">Clear</button>
     </div>
+    <div id="saveControls" style="margin-top:10px;">
+        <button id="saveStart">Start</button>
+        <button id="saveMiddle">Middle</button>
+        <button id="saveEnd">End</button>
+        <button id="saveAll">Save</button>
+    </div>
+    <div id="saveStatus" style="margin-top:5px;color:green;"></div>
     <div class="container">
         <canvas id="canvas" width="300" height="300"></canvas>
         <div id="imageDisplay">
@@ -65,12 +72,20 @@
         const clearButton = document.getElementById('clearButton');
         const submitButton = document.getElementById('submitButton');
         const eraserButton = document.getElementById('eraserButton');
+        const saveStartButton = document.getElementById('saveStart');
+        const saveMiddleButton = document.getElementById('saveMiddle');
+        const saveEndButton = document.getElementById('saveEnd');
+        const saveAllButton = document.getElementById('saveAll');
         const imageDisplay = document.getElementById('imageDisplay');
 
         // Event listeners
         clearButton.addEventListener('click', clearCanvas);
         submitButton.addEventListener('click', submitData);
         eraserButton.addEventListener('click', toggleEraser);
+        saveStartButton.addEventListener('click', () => saveTrack('start'));
+        saveMiddleButton.addEventListener('click', () => saveTrack('middle'));
+        saveEndButton.addEventListener('click', () => saveTrack('end'));
+        saveAllButton.addEventListener('click', saveAllTracks);
 
         // Initialize history
         saveToHistory();
@@ -213,14 +228,14 @@
                 alert('Please draw a stickman first');
                 return;
             }
-            
+
             const data = {
                 stickman: curves
             };
-            
+
             // Show loading state
             imageDisplay.innerHTML = '<div style="text-align:center">Generating image...</div>';
-            
+
             fetch('/submit', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -240,6 +255,42 @@
                 console.error('Error:', error);
                 imageDisplay.innerHTML = '<div style="text-align:center;color:red">Failed to generate image</div>';
             });
+        }
+
+        function saveTrack(stage) {
+            if (curves.length === 0) {
+                alert('Please draw a stickman first');
+                return;
+            }
+            const data = {
+                stage: stage,
+                stickman: curves
+            };
+            fetch('/save_track', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            })
+            .then(resp => resp.json())
+            .then(res => {
+                alert('Saved ' + stage);
+            })
+            .catch(console.error);
+            clearCanvas();
+        }
+
+        function saveAllTracks() {
+            fetch('/save_tracks', {
+                method: 'POST'
+            })
+            .then(resp => resp.json())
+            .then(res => {
+                if (res.status === 'saved') {
+                    alert('Tracks saved to ' + res.path);
+                    document.getElementById('saveStatus').innerText = 'Saved to ' + res.path;
+                }
+            })
+            .catch(console.error);
         }
     </script>
 </body>
