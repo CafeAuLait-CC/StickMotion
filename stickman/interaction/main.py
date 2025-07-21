@@ -18,6 +18,9 @@ generate_pose = get_pose_model(cfg_path='configs/remodiffuse/remodiffuse_kit.py'
 app = FastAPI()
 templates = Jinja2Templates(directory='stickman/interaction')
 
+# Buffer for storing tracks saved from the web interface
+track_cache = {}
+
 def resample_polyline(polyline, num_samples):
     # Equidistant sampling
     # polyline [n, 2]
@@ -87,8 +90,46 @@ async def submit(request: Request):
         else:
             raise ValueError('The number of the lines should be 6 or 0')
     # user_input = (stickmen, text)
-    buf = generate_pose(stickmen[0]) # (6,64,2) 
+    buf = generate_pose(stickmen[0]) # (6,64,2)
     return StreamingResponse(buf, media_type="image/png")
+
+
+@app.post("/save_track")
+async def save_track(request: Request):
+    """Cache the drawn stickman as start/middle/end track."""
+    data = await request.json()
+    stage = data.get('stage')
+    lines_data = data.get('stickman', [])
+    lines = []
+    for _lines in lines_data:
+        line = []
+        for point in _lines:
+            line.append([point['x'], -point['y']])
+        lines.append(line)
+    if len(lines) != 6:
+        return JSONResponse({'error': 'The number of the lines should be 6'}, status_code=400)
+
+    track = get_interpolated_track(lines, point_num=64)
+    track = norm_tracks(track)
+    track_cache[stage] = track
+
+    return JSONResponse({'status': 'cached', 'stage': stage})
+
+
+@app.post("/save_tracks")
+async def save_tracks():
+    """Concatenate cached tracks and save to an npy file."""
+    zero_track = np.zeros((6, 64, 2), dtype=np.float32)
+    ordered = [
+        track_cache.get('start', zero_track),
+        track_cache.get('middle', zero_track),
+        track_cache.get('end', zero_track),
+    ]
+    save_arr = np.stack(ordered, axis=0)
+    save_path = os.path.abspath('stickman_tracks.npy')
+    np.save(save_path, save_arr)
+    track_cache.clear()
+    return JSONResponse({'status': 'saved', 'path': save_path})
 
 if __name__ == "__main__":
     import uvicorn
