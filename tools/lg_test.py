@@ -1,3 +1,5 @@
+import ssl
+ssl._create_default_https_context = ssl._create_stdlib_context
 import argparse
 import os
 import sys
@@ -100,6 +102,6 @@ def main():
 if __name__ == '__main__':
     main()
 
-# python tools/lg_test.py /mnt/new_disk2/wangtao/StickMotion/logs/kit_ml/tp_locus_fix/last.ckpt -1
+# python tools/lg_test.py  /root/StickMotion/logs/kit_ml/tp_attn1/last.ckpt -1
 
-# python tools/lg_test.py /mnt/new_disk2/wangtao/StickMotion/logs/kit_ml/tp_init/last.ckpt 2
+# python tools/lg_test.py /root/StickMotion/logs/kit_ml/tp_init/last.ckpt 2

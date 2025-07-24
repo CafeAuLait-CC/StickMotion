@@ -69,8 +69,8 @@ class StickmanDataset(Dataset):
                 
             self.joints.append(joint)
             '''
-            np.save('/mnt/new_disk2/wangtao/StickMotion/joint.npy', joint)
-            scp local_container:/mnt/new_disk2/wangtao/StickMotion/joint.npy C:\\Users\\16587\\Desktop\\joint.npy
+            np.save('/root/StickMotion/joint.npy', joint)
+            scp local_container:/root/StickMotion/joint.npy C:\\Users\\16587\\Desktop\\joint.npy
             '''
         self.joints = np.concatenate(self.joints, axis=0)
 

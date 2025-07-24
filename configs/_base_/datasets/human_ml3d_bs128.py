@@ -1,13 +1,14 @@
 # dataset settings
-data_keys = ['motion', 'motion_mask', 'motion_length', 'clip_feat', 'sample_idx', 'text_idx', 'specified_idx', 'stickman_tracks', 'norm_joints', 'locus'] 
+data_keys = ['motion', 'motion_mask', 'motion_length', 'clip_feat', 'sample_idx', 'text_idx',  'stickman_tracks',  'locus', 'stick_mask'] 
 meta_keys = ['text', 'token']
 crop_size = 196
 train_pipeline = [
+    dict(type='Crop', crop_size=crop_size),
+    dict(type='StickThing', crop_size=crop_size),
     dict(
         type='Normalize',
         mean_path='data/datasets/human_ml3d/mean.npy',
         std_path='data/datasets/human_ml3d/std.npy'),
-    dict(type='Crop', crop_size=196),
     dict(type='ToTensor', keys=data_keys),
     dict(type='Collect', keys=data_keys, meta_keys=meta_keys)
 ]
@@ -29,7 +30,7 @@ data = dict(
             clip_feat_dir='clip_feats',
             crop_size=crop_size
         ),
-        times=200
+        times=100
     ),
     test=dict(
         type='Stickmant2mDataset',

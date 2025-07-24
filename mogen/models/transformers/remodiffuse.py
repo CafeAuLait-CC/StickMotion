@@ -390,8 +390,8 @@ class ReMoDiffuseTransformer(DiffusionTransformer):
                     'none_coef': 1 - 2*w
                 }
             # output = {
-            #     'both_coef': 0,
-            #     'text_coef': 2*w,
+            #     'both_coef': 2*w,
+            #     'text_coef': 0,
             #     'retr_coef': 0,
             #     'none_coef': 1 - 2*w
             # }

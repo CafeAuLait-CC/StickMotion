@@ -147,5 +147,5 @@ pred_motion = output[id]['pred_motion'][:length]
 from stickman.eval_with_eye import norm_motion2joint
 # joint = norm_motion2joint(torch.Tensor(motion), 21)
 joint = norm_motion2joint(torch.Tensor(pred_motion), 21)
-np.save('/mnt/new_disk2/wangtao/StickMotion/joint.npy', joint)
+np.save('/root/StickMotion/joint.npy', joint)
 '''

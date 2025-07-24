@@ -159,7 +159,7 @@ def main():
                           ],
                     #   profiler=advanced_profiler,
                       )     
-    # model.load_state_dict(torch.load('/mnt/new_disk2/wangtao/StickMotion/logs/kit_ml/tp_loss2/last.ckpt', map_location='cpu')['state_dict']) 
+    # model.load_state_dict(torch.load('/root/StickMotion/logs/kit_ml/tp_loss2/last.ckpt', map_location='cpu')['state_dict']) 
     trainer.fit(model, train_loader)
 
 
@@ -167,4 +167,4 @@ if __name__ == '__main__':
     main()
 
 # python tools/lg_train.py configs/remodiffuse/remodiffuse_kit.py  tp_init -1
-# po 5 python tools/lg_train.py  configs/remodiffuse/remodiffuse_t2m.py  user_0608 -1
+# po 5 python tools/lg_train.py  configs/remodiffuse/remodiffuse_t2m.py  debug -1

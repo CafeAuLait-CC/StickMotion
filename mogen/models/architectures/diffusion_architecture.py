@@ -231,7 +231,7 @@ res = results[209]
 motion_length = res['motion_length'].item()
 # motion = res['pred_motion'][:motion_length]
 motion = res['motion'][:motion_length]
-np.save('/mnt/new_disk2/wangtao/StickMotion/joint.npy', motion2joint(motion, joints_num=22))
+np.save('/root/StickMotion/joint.npy', motion2joint(motion, joints_num=22))
 scp local_container:joint.npy C:\\Users\\16587\\Desktop\\joint.npy
 
 res = results[67]
@@ -247,6 +247,6 @@ threed2rot(motion2joint(motion, joints_num=22))
 # scp local_container:all_infor.pkl C:\\Users\\16587\\Desktop\\all_infor.pkl
 
 
-np.save('/mnt/new_disk2/wangtao/StickMotion/joint.npy', joint)
-scp local_container:/mnt/new_disk2/wangtao/StickMotion/joint.npy C:\\Users\\16587\\Desktop\\joint.npy
+np.save('/root/StickMotion/joint.npy', joint)
+scp local_container:/root/StickMotion/joint.npy C:\\Users\\16587\\Desktop\\joint.npy
 '''

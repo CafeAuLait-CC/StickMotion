@@ -45,7 +45,7 @@ stick_set = dict(
 )
 
 # checkpoint saving
-checkpoint_config = dict(interval=10)
+checkpoint_config = dict(interval=5)
 
 dist_params = dict(backend='nccl')
 log_level = 'INFO'
@@ -68,6 +68,7 @@ log_config = dict(
     ])
 
 input_feats = 263
+locus_dim = 10
 max_seq_len = 196
 latent_dim = 512
 time_embed_dim = 2048
@@ -81,10 +82,13 @@ index_num = 3
 model = dict(
     type='MotionDiffusion',
     loss_weight=dict(
-        motion_w=1,
+        # motion_w=0,
+        # index_w=0
+        stickman_w=1.0,
+        locus_w=1.0,
     ),
     index_num=index_num,
-    motion_crop=[4, 22*3+4],
+    motion_crop=[4, 4+21*9],
     model=dict(
         type='ReMoDiffuseTransformer',
         input_feats=input_feats,
@@ -104,8 +108,9 @@ model = dict(
             text_latent_dim=text_latent_dim,
             num_heads=num_heads,
             dropout=dropout,
+            locus_dim=locus_dim,
             time_embed_dim=time_embed_dim,
-            stick_latent_dim=feat_dim
+            stick_latent_dim=latent_dim,
         ),
         ffn_cfg=dict(
             latent_dim=latent_dim,
@@ -124,7 +129,12 @@ model = dict(
         multistick_encoder=dict(
             stick_encoder = stick_set['stickman_encoder'],
             weight='stickman/weight/real_init/t2m/stickman_encoder.ckpt',
-            d_model=feat_dim
+            d_model=feat_dim,
+            out_dim=latent_dim,
+            ),
+        locus_encoder=dict(
+            input_dim=4, 
+            latent_dim=locus_dim
             ),
         scale_func_cfg=dict(
             coarse_scale=2.0,
