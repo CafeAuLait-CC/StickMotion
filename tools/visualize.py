@@ -450,7 +450,8 @@ def main():
         [[motion_length]], dtype=torch.long, device=device
     )
     model = model.to(device)
-    model.module.others_cuda()
+    getattr(model, "module", model).others_cuda()
+    # model.module.others_cuda()
 
     if args.stickman_path is not None:
         tracks_np = np.load(args.stickman_path)
