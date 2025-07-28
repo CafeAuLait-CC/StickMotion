@@ -179,14 +179,15 @@ class SemanticsModulatedAttention(nn.Module):
         self.num_heads = num_heads
         self.norm = nn.LayerNorm(latent_dim)
         self.query = nn.Linear(latent_dim, latent_dim)
+        self.query_locus = nn.Linear(locus_dim, latent_dim)
         self.text_encoder = SubAttention(latent_dim, text_latent_dim, num_heads)
         self.stick_encoder = StandardAttention(latent_dim, stick_latent_dim, num_heads)
         self.y_encoder = SelfAttention(latent_dim, num_heads)
-        self.x_locus = nn.Sequential(
-            nn.Linear(locus_dim, latent_dim),
-            nn.LeakyReLU(),
-            nn.Linear(latent_dim, latent_dim),
-        )
+        # self.mid_proj = nn.Sequential(
+        #     nn.Linear(latent_dim, latent_dim),
+        #     nn.LeakyReLU(),
+        #     nn.Linear(latent_dim, latent_dim),
+        # )
 
         self.proj_out = StylizationBlock(latent_dim, time_embed_dim, dropout)
     # from line_profiler import profile
@@ -211,7 +212,7 @@ class SemanticsModulatedAttention(nn.Module):
         locus_emb = locus_emb[ci[1]:ci[3]]
         # stick_query = self.query_locus(torch.cat((stick_query, locus_emb), dim=-1))
         stick_x = x[ci[1]:ci[3]]
-        stick_x = stick_x + self.x_locus(locus_emb)
+        stick_x = stick_x + self.query_locus(locus_emb)
         stick_x_mask = src_mask[ci[1]:ci[3]]
         stick_emb = stick_emb[ci[1]:ci[3]]
         stick_mask = stick_mask[ci[1]:ci[3]]

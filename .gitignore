@@ -12,6 +12,7 @@ lightning_logs/
 *.pdf
 # C extensions
 *.so
+*.swp
 
 # Distribution / packaging
 .Python
