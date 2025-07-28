@@ -480,7 +480,7 @@ class GaussianDiffusion:
         B, C = x.shape[:2]
         assert t.shape == (B,)
         model_outputs = model(x, self._scale_timesteps(t), **model_kwargs)
-        model_output, index = model_outputs
+        model_output = model_outputs
         if self.model_var_type in [ModelVarType.LEARNED, ModelVarType.LEARNED_RANGE]:
             assert model_output.shape == (B, 2 * C, *x.shape[2:])
             model_output, model_var_values = th.split(model_output, C, dim=1)
@@ -547,7 +547,6 @@ class GaussianDiffusion:
             "variance": model_variance,
             "log_variance": model_log_variance,
             "pred_xstart": pred_xstart,
-            "index": index,
         }
 
     def _predict_xstart_from_eps(self, x_t, t, eps):
@@ -837,7 +836,7 @@ class GaussianDiffusion:
             (t != 0).float().view(-1, *([1] * (len(x.shape) - 1)))
         )  # no noise when t == 0
         sample = mean_pred + nonzero_mask * sigma * noise
-        return {"sample": sample, "pred_xstart": out["pred_xstart"], "index": out["index"]}
+        return {"sample": sample, "pred_xstart": out["pred_xstart"]}
 
     def ddim_reverse_sample(
         self,
@@ -1035,7 +1034,7 @@ class GaussianDiffusion:
                 terms["loss"] *= self.num_timesteps
         elif self.loss_type == LossType.MSE or self.loss_type == LossType.RESCALED_MSE:
             model_outputs = model(x_t, self._scale_timesteps(t), **model_kwargs)
-            model_output, index, p_batch, stick_mask = model_outputs
+            model_output,  p_batch, stick_mask = model_outputs
             if self.model_var_type in [
                 ModelVarType.LEARNED,
                 ModelVarType.LEARNED_RANGE,
@@ -1070,7 +1069,6 @@ class GaussianDiffusion:
             #     terms["loss"] = terms["mse"]
             terms["target"] = target
             terms["pred"] = model_output
-            terms["index"] = index
             terms["p_batch"] = p_batch
             terms["stick_mask"] = stick_mask
         else:

@@ -290,20 +290,46 @@ class PositionalEncoding(nn.Module):
     def forward(self, x):
         return x + self.pe[:x.size(0), :]
 
-from stickman.model import FCN
+class LocusEncoder(nn.Module):
+    def __init__(self, input_dim=2,  latent_dim=10):
+        super().__init__()
+        self.input_dim = input_dim
+        self.latent_dim = latent_dim
+        self.single_embed = nn.Sequential(
+            nn.Linear(input_dim, latent_dim),
+            nn.LeakyReLU(),
+            nn.Linear(latent_dim, latent_dim)
+        )
+        self.inter_embed = nn.Sequential(
+            nn.Conv1d(latent_dim, latent_dim*2, kernel_size=3, padding=1),
+            nn.LeakyReLU(),
+            *[nn.Conv1d(latent_dim*2, latent_dim*2, kernel_size=3, padding=1),
+            nn.LeakyReLU()] * 6,
+            nn.Conv1d(latent_dim*2, latent_dim, kernel_size=1, padding=0),
+        )
+                
+
+    def forward(self, x):
+        """
+        x: B, T, 2 -> B, (T, latent_dim) -> B, T, latent_dim
+        """
+        x = self.single_embed(x)  # B, T, latent_dim
+        # x = rearrange(x, 'b t d -> b (t d)')  # B, T*latent_dim
+        x = x.permute(0, 2, 1)  # B, latent_dim, T
+        x = self.inter_embed(x)  # B, latent_dim, T
+        x = x.permute(0, 2, 1)  # B, T, latent_dim
+        return x
+
 class MultiStickEncoder(nn.Module):
-    def __init__(self, stick_encoder, weight, d_model=512):
+    def __init__(self, stick_encoder, weight, d_model=512, out_dim=512):
     # def __init__(self, stick_encoder, d_model=512):
         super().__init__()
         self.stick_encoder = StickmanEncoder(stick_encoder)
-        self.posencoding = PositionalEncoding(d_model)
+        # self.posencoding = PositionalEncoding(d_model)
         self.proj = nn.Sequential(
             nn.Linear(d_model, d_model),
             nn.LeakyReLU(),
-            nn.Identity(),
-            nn.Linear(d_model, d_model),
-            nn.LeakyReLU(),
-            nn.Identity()
+            nn.Linear(d_model, out_dim),
         )
         # load weight
         self.stick_encoder.load_state_dict(torch.load(weight))    
@@ -311,36 +337,28 @@ class MultiStickEncoder(nn.Module):
         for param in self.stick_encoder.parameters():
             param.requires_grad = False
         self.stick_encoder.eval() # settled batchnorm, no dropout
-
-        
-        # self.up_proj = FCN(in_dim=stick_encoder.out_dim*2, out_dim=d_model*2, dim_list=up_dims, dropout=dropout)
-        # encoder_layer = nn.TransformerEncoderLayer(out_dim, 
-        #                                            dropout=dropout,
-        #                                            activation=activation,
-        #                                            dim_feedforward=ff_dim,
-        #                                            nhead=nhead)
-        # self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
         
     def forward(self, x): #[b, n, 6, 64, 2] should be track for stickman n is number of stickman
         index_num = x.shape[1]
         x1 = rearrange(x, 'b n l p c -> (b n) l p c')
         x2 = self.stick_encoder(x1)
         x3 = rearrange(x2, '(b n) e -> b n e', n=index_num)
-        x4 = self.posencoding(x3)
-        y = self.proj(x4)
+        # x4 = self.posencoding(x3)
+        y = self.proj(x3)
         return y
-
 
 @SUBMODULES.register_module()
 class ReMoDiffuseTransformer(DiffusionTransformer):
     def __init__(self,
                  multistick_encoder=None,
+                 locus_encoder=None,
                  scale_func_cfg=None,
                  condition_cfg=None,
                  **kwargs):
         super().__init__(**kwargs)
         # self.database = RetrievalDatabase(**retrieval_cfg)
-        self.multistick_encoder = MultiStickEncoder(**multistick_encoder)
+        self.encode_stickman = MultiStickEncoder(**multistick_encoder)
+        self.encode_locus = LocusEncoder(**locus_encoder)
         self.scale_func_cfg = scale_func_cfg
         text_p = condition_cfg.text_p
         stick_p = condition_cfg.stick_p
@@ -371,24 +389,12 @@ class ReMoDiffuseTransformer(DiffusionTransformer):
                     'retr_coef': 0,
                     'none_coef': 1 - 2*w
                 }
-                # output = {
-                #     'both_coef': 2*w,
-                #     'text_coef': 0,
-                #     'retr_coef': 0,
-                #     'none_coef': 1 - 2*w
-                # }
-                # output = {
-                #     'both_coef': w,
-                #     'text_coef': 0,
-                #     'retr_coef': w,
-                #     'none_coef': 1 - 2*w
-                # }
-                # output = {
-                #     'both_coef': 0,
-                #     'text_coef': w,
-                #     'retr_coef': 0,
-                #     'none_coef': 1 - w
-                # }
+            # output = {
+            #     'both_coef': 2*w,
+            #     'text_coef': 0,
+            #     'retr_coef': 0,
+            #     'none_coef': 1 - 2*w
+            # }
         else:
             both_coef = self.scale_func_cfg['both_coef']
             text_coef = self.scale_func_cfg['text_coef']
@@ -407,10 +413,10 @@ class ReMoDiffuseTransformer(DiffusionTransformer):
                 'none_coef': 0.
             }
             # output = {
-            #     'both_coef': 0.49,
-            #     'text_coef': 0.21,
-            #     'retr_coef': 0.21,
-            #     'none_coef': 0.09
+            #     'both_coef': 0.,
+            #     'text_coef': 1.,
+            #     'retr_coef': 0.,
+            #     'none_coef': 0.
             # }
         return output
     # from line_profiler import profile
@@ -420,62 +426,57 @@ class ReMoDiffuseTransformer(DiffusionTransformer):
                                  stickman_tracks=None,
                                  motion_length=None,
                                  xf_out=None,
-                                 stick_encoder=None,
+                                 stickman_emb=None,
                                  device=None,
                                  sample_idx=None,
                                  clip_feat=None,
+                                 locus_emb=None,
+                                 locus=None,
                                  **kwargs):
+        B, T = stickman_tracks.shape[0], stickman_tracks.shape[1]
         if xf_out is None:
             xf_out = self.encode_text(text, clip_feat, device)
         output = {'xf_out': xf_out}
-        if  stick_encoder is None:
-            stick_encoder = self.multistick_encoder(stickman_tracks)
-        output['stick_encoder'] = stick_encoder
+        if  stickman_emb is None:
+            stickman_emb = self.encode_stickman(stickman_tracks)
+        output['stickman_emb'] = stickman_emb
+        if locus_emb is None:
+            motion_length_x = torch.cat([motion_length[:,None].expand(-1, T, 1), self.len_pos[None,:T,None].expand(B, -1, -1)], dim=-1)
+            motion_length_x = motion_length_x/100 - 1  # B, T, 2
+            locus_x = locus/100 # *(-1) # B, T, 2
+            locus_x = torch.cat([locus_x, motion_length_x], dim=-1) # B, T, 4
+            locus_emb = self.encode_locus(locus_x)  # B, T, latent_dim
+        output['locus_emb'] = locus_emb
         return output
 
     def post_process(self, motion):
         return motion
 
-    def forward_train(self, h=None, src_mask=None, emb=None, xf_out=None, stick_encoder=None, **kwargs):
+    def forward_train(self, h=None, src_mask=None, emb=None, xf_out=None, stickman_emb=None, stick_mask=None, locus_emb=None, **kwargs):
         B, T = h.shape[0], h.shape[1]
         p_batch = [int(self.text_only_p * B), int(self.both_p * B), int(self.stick_only_p * B)]
-        stick_mask = (torch.rand((B, self.index_num, 1), device=h.device) < self.index_p).int()
+        # stick_mask = (torch.rand((B, self.index_num, 1), device=h.device) < self.index_p).int()
         p_batch.append(B - sum(p_batch))
         for module in self.temporal_decoder_blocks:
-            h = module(x=h, text_emb=xf_out, other_emb=emb, src_mask=src_mask, cond_type=p_batch, stick_emb=stick_encoder, stick_mask=stick_mask)
+            h = module(x=h, text_emb=xf_out, other_emb=emb, src_mask=src_mask, cond_type=p_batch, stick_emb=stickman_emb, stick_mask=stick_mask, locus_emb=locus_emb)
         output = self.out(h).view(B, T, -1).contiguous()
-        index = self.index_out(h).view(B, T, self.index_num).contiguous()
-        index = softmax(index - 1000000 * (1 - src_mask), dim=1)
-        return output, index, p_batch, stick_mask
+        return output,  p_batch, stick_mask
     
 
-    def forward_test(self, h=None, src_mask=None, emb=None, xf_out=None, stick_encoder=None, timesteps=None, **kwargs):
+    def forward_test(self, h=None, src_mask=None, emb=None, xf_out=None, stickman_emb=None, timesteps=None, stick_mask=None, locus_emb=None, **kwargs):
         B, T = h.shape[0], h.shape[1]
-        # both_cond_type = torch.zeros(B, 1, 1).to(h.device) + 99
-        # text_cond_type = torch.zeros(B, 1, 1).to(h.device) + 1
-        # retr_cond_type = torch.zeros(B, 1, 1).to(h.device) + 10
-        # none_cond_type = torch.zeros(B, 1, 1).to(h.device)
-        
-        # all_cond_type = torch.cat((
-        #     both_cond_type, text_cond_type, retr_cond_type, none_cond_type
-        # ), dim=0)
-        all_cond_type = [int(0.25 * 4 * B)]*3
-        all_cond_type.append(4*B - sum(all_cond_type))
+        all_cond_type = [B]*4
         h = h.repeat(4, 1, 1)
         xf_out = xf_out.repeat(4, 1, 1)
         emb = emb.repeat(4, 1)
         src_mask = src_mask.repeat(4, 1, 1)
-        stick_encoder = stick_encoder.repeat(4, 1, 1)
-        # if re_dict['re_motion'].shape[0] != h.shape[0]:
-        #     re_dict['re_motion'] = re_dict['re_motion'].repeat(4, 1, 1, 1)
-        #     re_dict['re_text'] = re_dict['re_text'].repeat(4, 1, 1, 1)
-        #     re_dict['re_mask'] = re_dict['re_mask'].repeat(4, 1, 1)
-        stick_mask = torch.ones((4*B, self.index_num, 1), device=h.device)
+        stickman_emb = stickman_emb.repeat(4, 1, 1)
+        locus_emb = locus_emb.repeat(4, 1, 1)
+        stick_mask = stick_mask.repeat(4, 1, 1)
+        
         for module in self.temporal_decoder_blocks:
-            h = module(x=h, text_emb=xf_out, other_emb=emb, src_mask=src_mask, cond_type=all_cond_type, stick_emb=stick_encoder, stick_mask=stick_mask)
+            h = module(x=h, text_emb=xf_out, other_emb=emb, src_mask=src_mask, cond_type=all_cond_type, stick_emb=stickman_emb, stick_mask=stick_mask, locus_emb=locus_emb)
         out = self.out(h).view(4 * B, T, -1).contiguous()
-        index = self.index_out(h).view(4 * B, T, self.index_num).contiguous()
-        index = softmax(index - 1000000 * (1 - src_mask), dim=1)[B:2*B]
         out_text = out[:B].contiguous()
         out_both = out[B: 2 * B].contiguous()
         out_retr = out[2 * B: 3 * B].contiguous()
@@ -488,4 +489,4 @@ class ReMoDiffuseTransformer(DiffusionTransformer):
         retr_coef = coef_cfg['retr_coef']
         none_coef = coef_cfg['none_coef']
         output = out_both * both_coef + out_text * text_coef + out_retr * retr_coef + out_none * none_coef
-        return output, index
+        return output

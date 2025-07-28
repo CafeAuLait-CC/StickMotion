@@ -20,7 +20,7 @@ title_size=30
 def motion_temporal_filter(motion, sigma=1):
     motion = motion.reshape(motion.shape[0], -1)
     for i in range(motion.shape[1]):
-        motion[:, i] = gaussian_filter(motion[:, i], sigma=sigma, mode="nearest")
+        motion[:, i] = gaussian_filter(motion[:, i], sigma=sigma, mode="nearest")  
     return motion.reshape(motion.shape[0], -1, 3)
 
 def track_vis(track, fig, idx, title='track'):
@@ -171,6 +171,17 @@ def stick_motion_vis(sticks, motions, title, joints_num=21):
         joint = recover_from_ric(motion, joints_num).cpu().numpy()[0]
         pose_vis(joint[:, [2,0,1]], fig, mid+sid+2, f'{mid}', joints_num)
     plt.savefig('eval.pdf')
+
+def norm_motion2joint(motion, joints_num=21):
+    if joints_num == 21:
+        mean = mean_kit
+        std = std_kit
+    if joints_num == 22:
+        mean = mean_t2m
+        std = std_t2m
+    motion = motion * std + mean
+    joint = recover_from_ric(motion, joints_num).cpu().numpy()
+    return joint
 
 def recover_rel_from_ric(data, joints_num):
     positions = data[..., 4:(joints_num - 1) * 3 + 4]

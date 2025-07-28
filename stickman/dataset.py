@@ -68,7 +68,10 @@ class StickmanDataset(Dataset):
             joint = recover_from_ric(torch.Tensor(motion), self.joint_num).cpu().numpy()
                 
             self.joints.append(joint)
-
+            '''
+            np.save('/root/StickMotion/joint.npy', joint)
+            scp local_container:/root/StickMotion/joint.npy C:\\Users\\16587\\Desktop\\joint.npy
+            '''
         self.joints = np.concatenate(self.joints, axis=0)
 
 
@@ -95,8 +98,8 @@ if __name__ == "__main__":
     random.seed(seed)
     torch.random.manual_seed(seed)
     
-    # cfg = Config.fromfile("configs/remodiffuse/remodiffuse_kit.py")
-    cfg = Config.fromfile("configs/remodiffuse/remodiffuse_t2m.py")
+    cfg = Config.fromfile("configs/remodiffuse/remodiffuse_kit.py")
+    # cfg = Config.fromfile("configs/remodiffuse/remodiffuse_t2m.py")
     joint_num = cfg.norm_pose_dim // 3
     train_dataset = StickmanDataset(cfg, train=True, train_ratio=0.8)
     from torch.utils.data import DataLoader

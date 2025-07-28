@@ -1,5 +1,6 @@
 from abc import ABCMeta, abstractmethod
 from cv2 import norm
+from einops import rearrange
 import torch
 from torch import layer_norm, nn
 import torch.nn.functional as F
@@ -97,6 +98,8 @@ class DecoderLayer(nn.Module):
         return x
 
 
+        
+
 class DiffusionTransformer(BaseModule, metaclass=ABCMeta):
     def __init__(self,
                  input_feats,
@@ -118,6 +121,7 @@ class DiffusionTransformer(BaseModule, metaclass=ABCMeta):
         self.num_layers = num_layers
         self.time_embed_dim = time_embed_dim
         self.sequence_embedding = nn.Parameter(torch.randn(max_seq_len, latent_dim))
+        self.register_buffer('len_pos', torch.arange(max_seq_len, dtype=torch.float32, device=self.sequence_embedding.device))
         self.index_num = int(index_num)
         
         self.use_cache_for_text = use_cache_for_text
@@ -126,8 +130,12 @@ class DiffusionTransformer(BaseModule, metaclass=ABCMeta):
         self.build_text_encoder(text_encoder)
 
         # Input Embedding
-        self.joint_embed = nn.Linear(self.input_feats, self.latent_dim-1)
-
+        # self.joint_embed = nn.Linear(self.input_feats, self.latent_dim-11)
+        self.joint_embed = nn.Sequential(
+            nn.Linear(self.input_feats, self.latent_dim),
+            nn.SiLU(),
+            nn.Linear(self.latent_dim, self.latent_dim),
+        )
         self.time_embed = nn.Sequential(
             nn.Linear(self.latent_dim, self.time_embed_dim),
             nn.SiLU(),
@@ -137,11 +145,6 @@ class DiffusionTransformer(BaseModule, metaclass=ABCMeta):
         
         # Output Module
         self.out = zero_module(nn.Linear(self.latent_dim, self.input_feats))
-        self.index_out = nn.Sequential(
-            nn.Linear(self.latent_dim, self.latent_dim),
-            nn.LeakyReLU(),
-            nn.Linear(self.latent_dim, index_num),
-        )
         
     def build_temporal_blocks(self, sa_block_cfg, ca_block_cfg, ffn_cfg):
         self.temporal_decoder_blocks = nn.ModuleList()
@@ -234,7 +237,7 @@ class DiffusionTransformer(BaseModule, metaclass=ABCMeta):
     def forward_test(self, h, src_mask, emb, **kwargs):
         pass
 
-    def forward(self, motion, timesteps, motion_mask=None, motion_length=None, **kwargs):
+    def forward(self, motion, timesteps, motion_mask=None,  **kwargs):
         """
         motion: B, T, D
         """
@@ -251,11 +254,11 @@ class DiffusionTransformer(BaseModule, metaclass=ABCMeta):
             emb = self.time_embed(timestep_embedding(timesteps, self.latent_dim))
         # B, T, latent_dim
         h = self.joint_embed(motion)
-        motion_length_expanded = motion_length[:, None].expand(-1, h.size(1), -1) / 100 - 1
-        h = torch.concat([h, motion_length_expanded], dim=-1).contiguous()
-        h = h + self.sequence_embedding.unsqueeze(0)[:, :T, :] # position encoding of the frame
+        pos_emb = self.sequence_embedding.unsqueeze(0)[:, :T, :] # position encoding of the frame
+        h = h + pos_emb
+        conditions['stickman_emb'] = conditions['stickman_emb'] + pos_emb
 
         if self.training:
-            return self.forward_train(h=h, src_mask=src_mask, emb=emb, timesteps=timesteps, **conditions)
+            return self.forward_train(h=h, src_mask=src_mask, emb=emb, timesteps=timesteps, stick_mask=kwargs['stick_mask'], **conditions)
         else:
-            return self.forward_test(h=h, src_mask=src_mask, emb=emb, timesteps=timesteps, **conditions)
+            return self.forward_test(h=h, src_mask=src_mask, emb=emb, timesteps=timesteps, stick_mask=kwargs['stick_mask'], **conditions)

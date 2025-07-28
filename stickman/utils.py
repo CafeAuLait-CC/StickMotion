@@ -122,6 +122,59 @@ def draw_joint(joint): #[22, 3]
     ax.view_init(elev=10, azim=10)
     plt.show()
 
+class StickLocus:
+    def __init__(self, dataset_name, smooth=1, shake=1):
+        if dataset_name == 'human_ml3d':
+            self.limbs_idx = t2m_limbs_idx
+        elif dataset_name == 'kit_ml':
+            self.limbs_idx = kit_limbs_idx
+        else:
+            raise NotImplementedError(f'Dataset {dataset_name} not implemented.')
+        self._sigma = smooth
+        self._shake = shake
+        
+
+    def random_param(self):
+        # return
+        self.shake=np.random.uniform(self._shake/4, self._shake)
+        self.sigma=np.random.uniform(self._sigma/10, self._sigma)
+        
+
+    
+    def norm_locus(self, joint):
+        limb_idx = np.array(self.limbs_idx) # [4, 3]
+        limb_joint = joint[limb_idx] # [4, 3, 3]
+        leg_length = np.linalg.norm(limb_joint[2:, 1:] - limb_joint[2:, :-1], axis=-1).mean()
+        locus = joint.copy()[:, 0, [0,2]]
+        locus = locus - locus[0] # center
+        locus = locus / leg_length # normalize
+        return locus
+        
+    def __call__(self, joint):
+        '''
+        joint: the joint of stickman [t, 22, 3],
+        smooth: the smooth of drawing [0-1],
+        shake: the shake of drawing [0-1],
+        '''
+        self.random_param()
+        smooth = self.sigma
+        shake = self.shake
+        locus = self.norm_locus(joint) # [t, 2]
+        # noise
+        noise = np.random.uniform(-shake, shake, locus.shape)
+        noise = np.cumsum(noise, axis=0)
+        noised_locus = locus + noise
+        
+        # smooth
+        x, y = noised_locus[:, 0], noised_locus[:, 1]
+        x_smooth = gaussian_filter1d(x, sigma=smooth, mode='nearest')
+        y_smooth = gaussian_filter1d(y, sigma=smooth, mode='nearest')
+        smoothed_locus = np.vstack((x_smooth, y_smooth)).T
+        
+        # resample_locus = resample_polyline(smoothed_locus, 64)
+        resample_locus = smoothed_locus
+        return resample_locus
+
 class StickMan:
     def __init__(self, 
                  dataset_name='kit_ml',

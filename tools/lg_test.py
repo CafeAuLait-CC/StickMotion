@@ -1,8 +1,11 @@
-import my_tools
+import ssl
+ssl._create_default_https_context = ssl._create_stdlib_context
 import argparse
 import os
 import sys
-workspace_path = os.path.abspath(os.path.join(__file__, *['..']*2))
+import os.path as osp
+workspace_path = osp.abspath(osp.join(__file__, *['..']*2))
+print(f'workspace_path: {workspace_path}')
 os.chdir(workspace_path)
 sys.path.insert(0, workspace_path)
 from pathlib import Path
@@ -23,6 +26,8 @@ from lightning.pytorch import seed_everything
 from lightning.pytorch import loggers
 from mmcv.parallel import DataContainer
 import hashlib
+import my_tools
+
 
 torch.set_float32_matmul_precision('high')
 
@@ -97,6 +102,6 @@ def main():
 if __name__ == '__main__':
     main()
 
-# python tools/lg_test.py logs/kit_ml//last.ckpt -1
+# python tools/lg_test.py  /root/StickMotion/logs/kit_ml/tp_attn1/last.ckpt -1
 
-# python tools/lg_test.py /mnt/new_disk2/wangtao/StickMotion/logs/kit_ml/init25_fix/last.ckpt 2
+# python tools/lg_test.py /root/StickMotion/logs/kit_ml/tp_init/last.ckpt 2

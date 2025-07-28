@@ -3,6 +3,7 @@ import os
 import os.path
 from abc import ABCMeta
 from collections import OrderedDict
+import random
 from typing import Any, List, Optional, Union
 
 import mmcv
@@ -14,7 +15,8 @@ from mmcv.runner import get_dist_info
 
 from .base_dataset import BaseMotionDataset
 from .builder import DATASETS
-from stickman.utils import StickMan
+from .utils import random_select_stickman
+from stickman.utils import StickLocus, StickMan
 from mogen.utils.plot_utils import recover_from_ric
 
 @DATASETS.register_module()
@@ -49,6 +51,7 @@ class Stickmant2mDataset(BaseMotionDataset):
             self.clip_feat_dir = None
         self.fine_mode = fine_mode
         # self.stickman = StickMan(part_scale=0,)
+        self.sticklocus = StickLocus(dataset_name=dataset_name)
         self.stickman = StickMan(dataset_name=dataset_name)
         mean_path = os.path.join(data_prefix, 'datasets', dataset_name, 'mean.npy')
         std_path = os.path.join(data_prefix, 'datasets', dataset_name, 'std.npy')
@@ -109,38 +112,15 @@ class Stickmant2mDataset(BaseMotionDataset):
         results['text_idx'] = sub_idx
         results['sample_idx'] = int(idx)
         # stickman
-        length = min(len(results['motion']), self.crop_size)-1
-        
-        # start_idx = np.random.randint(1, length//2)
-        # end_idx = np.random.randint(start_idx+length//2, length)
+        length = min(len(results['motion']), self.crop_size)
         if self.test_mode:
-            start_idx = length//8
-            mid_idx = length//2
-            end_idx = 7*length//8
+            results['specified_idx'] = [int(p*length) for p in [0.125,0.5,0.875]]
         else:
-            start_idx = np.random.randint(1, length//4)
-            mid_idx = np.random.randint(3*length//8, 5*length//8)
-            end_idx = np.random.randint(3*(length//4), length)
-            
-        
-        # start_idx = 1
-        # end_idx = length-1
-        
-        # start_idx = int((1+length//2)//2)
-        # end_idx = int((length-1+length//2)//2)
-        
-        # if np.random.rand() < 3/4:
-        #     start_idx = np.random.randint(1, length//4)
-        # else:
-        #     start_idx = np.random.randint(length//4, length//2)
-        # end_idx = np.random.randint(start_idx+length//2, length)
-        
-        results['specified_idx'] = [start_idx, mid_idx, end_idx]
-        # results['specified_idx'] = [start_idx, end_idx]
-        
-        motions = results['motion'][results['specified_idx']]
-        # results['specified_motion'] = (motions-self.mean)/(self.std+1e-6)
-        joints = recover_from_ric(torch.Tensor(motions), self.joint_num).cpu().numpy()
+            results['specified_idx'] = random_select_stickman(length=length)
+        ori_joints = recover_from_ric(torch.Tensor(results['motion']), self.joint_num).cpu().numpy()
+        # locus = self.sticklocus(ori_joints)
+        locus = ori_joints.copy()[:, 0, [0,2]] #*(-2) # [t, 2]
+        joints = ori_joints[results['specified_idx'], :, :]
         tracks = []
         norm_joints = []
         for i in range(len(joints)):
@@ -150,4 +130,5 @@ class Stickmant2mDataset(BaseMotionDataset):
         tracks = np.array(tracks)
         results['stickman_tracks'] = tracks.astype(np.float32)
         results['norm_joints'] = np.array(norm_joints).astype(np.float32)
+        results['locus'] = locus.astype(np.float32)
         return self.pipeline(results)

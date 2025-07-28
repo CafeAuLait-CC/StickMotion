@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from mmcv.runner import auto_fp16
+
+from mogen.utils.plot_utils import recover_from_ric
 from .base_architecture import BaseArchitecture
 from ..builder import (
     ARCHITECTURES,
@@ -96,8 +98,9 @@ class MotionDiffusion(BaseArchitecture):
 
 
     def forward(self, **kwargs):
-        motion, motion_mask = kwargs['motion'].float(), kwargs['motion_mask'].float()
-        specified_idx, stickman_tracks = kwargs['specified_idx'].int(), kwargs['stickman_tracks'].float()
+        motion, motion_length, motion_mask = kwargs['motion'].float(), kwargs['motion_length'].float(), kwargs['motion_mask'].float()
+        # specified_idx, stickman_tracks = kwargs['specified_idx'].int(), kwargs['stickman_tracks'].float()
+        stickman_tracks, locus, stick_mask = kwargs['stickman_tracks'].float(), kwargs['locus'].float(), kwargs['stick_mask'].float()
         sample_idx = kwargs.get('sample_idx', None)
         clip_feat = kwargs.get('clip_feat', None)
         B, T = motion.shape[:2]
@@ -114,41 +117,50 @@ class MotionDiffusion(BaseArchitecture):
                 model_kwargs={
                     'motion_mask': motion_mask,
                     'motion_length': kwargs['motion_length'],
-                    'text': text,
-                    'specified_idx': specified_idx,
+                    'locus': locus,
                     'stickman_tracks': stickman_tracks,
+                    'text': text,
+                    'stick_mask': stick_mask,
                     'clip_feat': clip_feat,
                     'sample_idx': sample_idx}
             )
-            #prepare
             all_loss = 0
-            pred, target, index, p_batch, stick_mask = output['pred'], output['target'], output['index'], output['p_batch'], output['stick_mask']
+            pred, target,  p_batch, stick_mask = output['pred'], output['target'],  output['p_batch'], output['stick_mask']
             motion_length = kwargs['motion_length'][:,0]
-            specified_motion = motion[torch.arange(B)[:,None], specified_idx, :] # [B, 2, M]
             loss = {}
-            # motion loss item
-            # loss['index_small'] = ((index < 0.5) * index).mean()
-            # all_loss += loss['index_small']
             all_loss_batch = self.loss_recon(pred, target, reduction_override='none') # [B, T, M]
-            # index loss and mask
-            # motion loss
+            
             loss_item = ['text_loss', 'both_loss', 'stick_loss', 'none_loss']
             assert len(p_batch) == len(loss_item)
             all_batch = sum(p_batch)
             start = 0
+            
+            joints_num = 21 if motion.shape[-1] == 251 else 22
             for i, batch in enumerate(p_batch):
                 if loss_item[i] in {'both_loss', 'stick_loss'}:
-                    length_m = motion_length[start:start+batch]
-                    spec_m = specified_motion[start:start+batch, :, self.motion_start:self.motion_end]
+
+                    # stickman
+                    mask_s = stick_mask[start:start+batch].squeeze(-1) # [B, T]
+                    gt_m = motion[start:start+batch, :, self.motion_start:self.motion_end] # [B, T, M] 
                     pred_m = pred[start:start+batch, :, self.motion_start:self.motion_end]
-                    spec_loss = []
-                    for j in range(self.index_num):
-                        diff = (spec_m[:,j,None] - pred_m).pow(2).mean(-1) # [B, T]
-                        w_m = index[start:start+batch,:,j] # [B, T, ID] -> [b, T]
-                        stick_cond_mask = stick_mask[start:start+batch,j,0] # [B, ID, 1] -> [b]
-                        spec_loss.append((((diff * w_m).sum(-1)*stick_cond_mask)).sum()/batch)
-                    loss[f'identity_{loss_item[i]}'] = sum(spec_loss)/len(spec_loss)
-                    all_loss = all_loss + batch/all_batch * loss[f'identity_{loss_item[i]}'] * self.loss_weight.motion_w
+                    stickman_diff = (gt_m - pred_m).pow(2).mean(-1) # [B, T]
+                    stickman_loss = (stickman_diff * mask_s).sum(-1) / (0.1 + mask_s.sum(-1))# [B]
+                    stickman_loss = stickman_loss.mean() # [1]
+                    loss[f'stickman_{loss_item[i]}'] = stickman_loss
+                    
+                    # locus
+                    pred_joint = recover_from_ric(pred[start:start+batch], joints_num=joints_num, ifnorm=True) # [B, T, J, 3]
+                    pred_locus = pred_joint[:, :, 0, [0,2]]/1000 # [B, T, 2]
+                    gt_locus = locus[start:start+batch]/1000 # [B, T, 2]
+                    locus_diff = (gt_locus - pred_locus).pow(2).mean(-1) # [B, T]
+                    mask_l = motion_mask[start:start+batch] # [B, T]
+                    locus_loss = (locus_diff * mask_l).sum(-1) / (1 + mask_l.sum(-1)) # [B]
+                    locus_loss = locus_loss.mean() # [1]
+                    loss[f'locus_{loss_item[i]}'] = locus_loss
+
+                    all_loss = all_loss + (batch / all_batch) * \
+                        (stickman_loss * self.loss_weight.stickman_w + \
+                         locus_loss * self.loss_weight.locus_w)
                 loss[loss_item[i]] = \
                 (all_loss_batch[start:start+batch].mean(-1) * \
                 motion_mask[start:start+batch]).sum() /\
@@ -160,9 +172,14 @@ class MotionDiffusion(BaseArchitecture):
         else:
             dim_pose = kwargs['motion'].shape[-1]
             model_kwargs = self.model.get_precompute_condition(device=motion.device,  **kwargs)
-            model_kwargs['motion_mask'] = motion_mask
-            model_kwargs['sample_idx'] = sample_idx
-            model_kwargs['motion_length'] = kwargs['motion_length']
+            model_kwargs={
+                'motion_mask': motion_mask,
+                'motion_length': motion_length,
+                'locus': locus,
+                'stickman_tracks': stickman_tracks,
+                'stick_mask': stick_mask,
+                **model_kwargs,
+            }
             inference_kwargs = kwargs.get('inference_kwargs', {})
             if self.inference_type == 'ddpm':
                 output = self.diffusion_test.p_sample_loop(
@@ -187,7 +204,6 @@ class MotionDiffusion(BaseArchitecture):
                 output = self.model.post_process(output)
             results = kwargs
             results['pred_motion'] = output["sample"]
-            results['pred_index'] = output["index"]
             results = self.split_results(results)
             return results
 
@@ -215,18 +231,22 @@ res = results[209]
 motion_length = res['motion_length'].item()
 # motion = res['pred_motion'][:motion_length]
 motion = res['motion'][:motion_length]
-np.save('joint.npy', motion2joint(motion, joints_num=22))
-scp mogen:joint.npy C:\\Users\\16587\\Desktop\\joint.npy
+np.save('/root/StickMotion/joint.npy', motion2joint(motion, joints_num=22))
+scp local_container:joint.npy C:\\Users\\16587\\Desktop\\joint.npy
 
 res = results[67]
 motion_length = res['motion_length'].item()
 motion = res['pred_motion'][:motion_length]
 threed2rot(motion2joint(motion))
-# scp mogen:all_infor.pkl C:\\Users\\16587\\Desktop\\all_infor.pkl
+# scp local_container:all_infor.pkl C:\\Users\\16587\\Desktop\\all_infor.pkl
 
 res = results[67]
 motion_length = res['motion_length'].item()
 motion = res['pred_motion'][:motion_length]
 threed2rot(motion2joint(motion, joints_num=22))
-# scp mogen:all_infor.pkl C:\\Users\\16587\\Desktop\\all_infor.pkl
+# scp local_container:all_infor.pkl C:\\Users\\16587\\Desktop\\all_infor.pkl
+
+
+np.save('/root/StickMotion/joint.npy', joint)
+scp local_container:/root/StickMotion/joint.npy C:\\Users\\16587\\Desktop\\joint.npy
 '''

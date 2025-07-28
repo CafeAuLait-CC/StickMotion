@@ -1,14 +1,17 @@
 from collections import defaultdict
-import my_tools
 import argparse
 import copy
 import os
+import sys
 import os.path as osp
+workspace_path = osp.abspath(osp.join(__file__, *['..']*2))
+print(f'workspace_path: {workspace_path}')
+os.chdir(workspace_path)
+sys.path.insert(0, workspace_path)
 import time
 
 import shutil
 from pathlib import Path
-import mmcv
 import torch
 from torch.utils.data import DataLoader
 from mmcv import Config, DictAction
@@ -28,6 +31,7 @@ from lightning.pytorch import seed_everything
 from lightning.pytorch.profilers import SimpleProfiler, AdvancedProfiler, PyTorchProfiler
 from lightning.pytorch.callbacks import DeviceStatsMonitor
 from mmcv.parallel import DataContainer
+import my_tools
 
 torch.set_float32_matmul_precision('high')
 
@@ -155,11 +159,12 @@ def main():
                           ],
                     #   profiler=advanced_profiler,
                       )     
+    # model.load_state_dict(torch.load('/root/StickMotion/logs/kit_ml/tp_loss2/last.ckpt', map_location='cpu')['state_dict']) 
     trainer.fit(model, train_loader)
 
 
 if __name__ == '__main__':
     main()
 
-# python tools/lg_train.py configs/remodiffuse/remodiffuse_kit.py  debug -2
-# po 5 python tools/lg_train.py  configs/remodiffuse/remodiffuse_t2m.py  user_0608 -1
+# python tools/lg_train.py configs/remodiffuse/remodiffuse_kit.py  tp_init -1
+# po 5 python tools/lg_train.py  configs/remodiffuse/remodiffuse_t2m.py  debug -1
