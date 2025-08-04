@@ -87,6 +87,8 @@ def main():
     else:
         pid_seed = os.getppid()
     model = LgModel(cfg, dataset, unit=hashlib.md5(str(pid_seed).encode()).hexdigest()[:8])
+
+    cfg.data.samples_per_gpu = 128
     test_loader = DataLoader(dataset, batch_size=cfg.data.samples_per_gpu, shuffle=False, num_workers=cfg.data.workers_per_gpu, collate_fn=collate_fn)
     trainer = Trainer(accelerator="gpu", 
                       strategy=DDPStrategy(),
@@ -95,6 +97,7 @@ def main():
                       logger=False, 
                     #   max_steps=3,
                       precision='16-mixed',
+                      inference_mode=False,
                       )
     trainer.validate(model, test_loader, ckpt_path=args.ckpt)
 

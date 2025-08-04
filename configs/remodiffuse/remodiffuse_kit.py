@@ -90,6 +90,11 @@ model = dict(
         stickman_w=1.0,
         locus_w=1.0,
     ),
+    guidance=dict(
+        repeat=3,
+        layer_num=2,
+        scale=1
+    ),
     index_num=index_num,
     motion_crop=[4, 4+20*9],
     model=dict(

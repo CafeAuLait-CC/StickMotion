@@ -71,6 +71,7 @@ class MotionDiffusion(BaseArchitecture):
                  model=None,
                  loss_recon=None,
                  loss_weight=None,
+                 guidance=None,
                  diffusion_train=None,
                  diffusion_test=None,
                  init_cfg=None,
@@ -86,6 +87,7 @@ class MotionDiffusion(BaseArchitecture):
         self.sampler = create_named_schedule_sampler('uniform', self.diffusion_train)
         self.inference_type = inference_type
         self.loss_weight = loss_weight
+        self.guidance = guidance
         self.motion_start = motion_crop[0]
         self.motion_end = motion_crop[1]
         self.index_num = index_num
@@ -178,6 +180,7 @@ class MotionDiffusion(BaseArchitecture):
                 'locus': locus,
                 'stickman_tracks': stickman_tracks,
                 'stick_mask': stick_mask,
+                'guidance': self.guidance,
                 **model_kwargs,
             }
             inference_kwargs = kwargs.get('inference_kwargs', {})

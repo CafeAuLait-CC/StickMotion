@@ -12,6 +12,8 @@ import torch as th
 from abc import ABC, abstractmethod
 import torch.distributed as dist
 
+from mogen.utils.plot_utils import recover_from_ric
+
 
 def create_named_schedule_sampler(name, diffusion):
     """
@@ -1266,6 +1268,21 @@ class SpacedDiffusion(GaussianDiffusion):
             return model
         return _WrappedModel(model, self.timestep_map, self.original_num_steps)
 
+def guidance_loss(pred_motion, **kwargs):
+    # return th.abs(model_out).mean()  # Placeholder for guidance verification
+    # locus
+    joints_num = 21 if pred_motion.shape[-1] == 251 else 22
+    gt_locus = kwargs['locus']/1000 # [b, T, 2]
+    motion_mask = kwargs['motion_mask'] # [b, T]
+    pred_joint = recover_from_ric(pred_motion.double(), joints_num=joints_num, ifnorm=True) # [B, T, J, 3]
+    pred_locus = pred_joint[:, :, 0, [0,2]]/1000 # [B, T, 2]
+    locus_loss = ((pred_locus - gt_locus) * motion_mask[..., None]).pow(2).mean(dim=(1,2)).sum() # * motion_mask.sum()
+
+    loss = locus_loss
+    return loss
+
+
+    
 
 class _WrappedModel:
     def __init__(self, model, timestep_map, original_num_steps):
@@ -1276,4 +1293,40 @@ class _WrappedModel:
     def __call__(self, x, ts, **kwargs):
         map_tensor = th.tensor(self.timestep_map, device=ts.device, dtype=ts.dtype)
         new_ts = map_tensor[ts]
-        return self.model(x, new_ts, **kwargs)
+        cur_step = new_ts[0].item()
+        guidance = kwargs['guidance']
+        if guidance.repeat == 0:
+            return self.model(x, new_ts, **kwargs)
+        else:
+            with th.no_grad():
+                h, mid_query = self.model(x, new_ts, mid_res=-1, **kwargs)  # Get initial model output
+            # guidance.repeat = 10
+            for i in range(guidance.repeat):
+                with th.enable_grad():
+                    mid_query = mid_query.detach().clone()
+                    mid_query.requires_grad_(True)
+                    h = h.detach().clone()
+                    h.requires_grad_(False)
+                    th.cuda.empty_cache()
+                    _model_out = self.model(x, new_ts, mid_res=(h, mid_query),  **kwargs) # TODO return mid_res
+                    loss = guidance_loss(_model_out, **kwargs) # TODO, first, set target is 0 to verify
+                    # loss.backward()
+                    mid_query_grad = th.autograd.grad(loss, mid_query, retain_graph=False)[0]
+                    mid_query = mid_query - mid_query_grad * guidance.scale
+                    mid_query = mid_query.detach().clone()
+                    mid_query.requires_grad_(False)
+                    th.cuda.empty_cache()
+            with th.no_grad():
+                model_out = self.model(x, new_ts, mid_res=(h, mid_query), **kwargs) # TODO. detact update_res and forward
+            # clean cuda memory
+            model_out = model_out.detach().clone()
+            del h, mid_query, _model_out, loss, mid_query_grad
+            th.cuda.empty_cache()
+                
+            return model_out
+'''
+                
+mid_query = mid_query + mid_query_grad * 100 #guidance.scale
+with th.no_grad():
+    model_out = self.model(x, new_ts, mid_res=(h, mid_query), **kwargs) # TODO. detact update_res and forward
+'''

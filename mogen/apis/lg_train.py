@@ -21,20 +21,20 @@ class LgModel(LightningModule):
         self.unit = unit
 
     
-    def on_train_epoch_start(self) -> None:
-        self.model.others_cuda()
+    # def on_train_epoch_start(self) -> None:
+    #     self.model.others_cuda()
 
-        torch.cuda.empty_cache()
-        device = self.device
-        free_memory, total_memory = torch.cuda.mem_get_info(device)
-        dtype = torch.uint8
-        element_size = torch.tensor([], dtype=dtype, device=device).element_size()
-        num_elements = int((free_memory // element_size) * 0.95)
-        try:
-            empty_tensor = torch.empty(num_elements, dtype=dtype, device=device)
-        except RuntimeError as e:
-            pass
-        return super().on_train_epoch_start()
+    #     torch.cuda.empty_cache()
+    #     device = self.device
+    #     free_memory, total_memory = torch.cuda.mem_get_info(device)
+    #     dtype = torch.uint8
+    #     element_size = torch.tensor([], dtype=dtype, device=device).element_size()
+    #     num_elements = int((free_memory // element_size) * 0.95)
+    #     try:
+    #         empty_tensor = torch.empty(num_elements, dtype=dtype, device=device)
+    #     except RuntimeError as e:
+    #         pass
+    #     return super().on_train_epoch_start()
     
 
     def on_validation_start(self) -> None:

@@ -92,6 +92,8 @@ class DecoderLayer(nn.Module):
             kwargs.update({'x': x})
         if self.ca_block is not None:
             x = self.ca_block(**kwargs)
+            if type(x) is tuple:
+                return x
             kwargs.update({'x': x})
         if self.ffn is not None:
             x = self.ffn(**kwargs)
@@ -257,6 +259,8 @@ class DiffusionTransformer(BaseModule, metaclass=ABCMeta):
         pos_emb = self.sequence_embedding.unsqueeze(0)[:, :T, :] # position encoding of the frame
         h = h + pos_emb
         conditions['stickman_emb'] = conditions['stickman_emb'] + pos_emb
+        conditions['mid_res'] = kwargs.get('mid_res', None)
+        conditions['guidance'] = kwargs.get('guidance', None)
 
         if self.training:
             return self.forward_train(h=h, src_mask=src_mask, emb=emb, timesteps=timesteps, stick_mask=kwargs['stick_mask'], **conditions)

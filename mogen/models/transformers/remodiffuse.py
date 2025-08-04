@@ -474,8 +474,20 @@ class ReMoDiffuseTransformer(DiffusionTransformer):
         locus_emb = locus_emb.repeat(4, 1, 1)
         stick_mask = stick_mask.repeat(4, 1, 1)
         
-        for module in self.temporal_decoder_blocks:
-            h = module(x=h, text_emb=xf_out, other_emb=emb, src_mask=src_mask, cond_type=all_cond_type, stick_emb=stickman_emb, stick_mask=stick_mask, locus_emb=locus_emb)
+        mid_res = kwargs.get('mid_res', None) # -1: return mid_res, None: no mid_res, tuple: resume mid_res
+        guidance = kwargs.get('guidance', None)
+        mid_query = None
+        if type(mid_res) is tuple: h, mid_query = mid_res
+        if mid_res == -1: mid_query = -1  # return mid_query
+
+        for i, module in enumerate(self.temporal_decoder_blocks):
+            if type(mid_res) is tuple and i < guidance.layer_num: continue # resume
+            _mid_query = mid_query if guidance.layer_num == i else None
+            h = module(x=h, text_emb=xf_out, other_emb=emb, src_mask=src_mask, cond_type=all_cond_type, stick_emb=stickman_emb, stick_mask=stick_mask, locus_emb=locus_emb, mid_query=_mid_query)
+            if mid_res == -1 and guidance.layer_num == i:
+                assert type(h) is tuple, f"Expected h to be a tuple when mid_res is -1, but got {type(h)}"
+                return h
+
         out = self.out(h).view(4 * B, T, -1).contiguous()
         out_text = out[:B].contiguous()
         out_both = out[B: 2 * B].contiguous()

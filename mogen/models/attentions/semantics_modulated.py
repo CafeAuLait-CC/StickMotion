@@ -192,13 +192,18 @@ class SemanticsModulatedAttention(nn.Module):
         self.proj_out = StylizationBlock(latent_dim, time_embed_dim, dropout)
     # from line_profiler import profile
     # @profile
-    def forward(self, x, text_emb, stick_emb, other_emb, src_mask, cond_type, stick_mask, locus_emb):
+    def forward(self, x, text_emb, stick_emb, other_emb, src_mask, cond_type, stick_mask, locus_emb, mid_query):
         """
         x: B, T, D
         xf: B, N, L # text features; re_dict: retrieval information
         cond_type [text, both, stick, none].sum() == batch_size
         """
         # B, T, D
+        if type(mid_query) is torch.Tensor:
+            _query = self.y_encoder(mid_query, x, src_mask)
+            y = x + self.proj_out(_query, other_emb)
+            return y
+
         query = self.query(self.norm(x))
         # B, N, D
         ci = [sum(cond_type[:i]) for i in range(len(cond_type))]
@@ -222,6 +227,9 @@ class SemanticsModulatedAttention(nn.Module):
 
         query[:ci[2]] = query[:ci[2]] + text_y
         query[ci[1]:ci[3]] = query[ci[1]:ci[3]] + stick_y
+
+        if mid_query == -1:
+            return x, query
         '''
         b_query = query[:ci[1]]
         # b1_query = query[:ci[1]]
@@ -237,8 +245,8 @@ class SemanticsModulatedAttention(nn.Module):
         # b4_query = query[ci[3]:]
         '''
 
-        query = self.y_encoder(query, x, src_mask)
-        y = x + self.proj_out(query, other_emb)
+        _query = self.y_encoder(query, x, src_mask)
+        y = x + self.proj_out(_query, other_emb)
 
 
         return y
