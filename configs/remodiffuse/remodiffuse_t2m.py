@@ -1,71 +1,74 @@
-_base_ = ['../_base_/datasets/human_ml3d_bs128.py']
+_base_ = ["../_base_/datasets/human_ml3d_bs128.py"]
 
-dataset_name='human_ml3d'
-point_len=64
-feat_dim=256
-norm_pose_dim=22*3
-stick_set = dict(
-    train=dict(
-        batch_size=512,
-        epochs=15,
-        lr=1e-4,
-        workers=40,
-        dataset_name=dataset_name
-    ),
-    stickman_encoder=dict(
-        point_len=point_len,
-        in_dim=point_len*2,
-        out_dim=feat_dim,
-        d_model=512,
-        dropout=0.1,
-        activation='relu',
-        nhead=16,
-        num_layers=5,
-        ff_dim=1024,
-    ),
-    stickman_decoder=dict(
-        in_dim=feat_dim,
-        out_dim=norm_pose_dim,
-        fcn_dims=[512, 512, 512, 512, 512],
-        # bran_dims=[512, 512],
-        dropout=0.1,
-        candidate_num=4,
-    ),
-    motion_encoder=dict(
-        in_dim=263,
-        out_dim=feat_dim,
-        fcn_dims=[512, 512, 512, 512, 512],
-        dropout=0.1
-    ),
-    loss=dict(
-        loss1=1.,
-        loss2=1.,
-        loss3=1.
-    )
-)
+# dataset_name='human_ml3d'
+# point_len=64
+# feat_dim=256
+# norm_pose_dim=22*3
+# stick_set = dict(
+#     train=dict(
+#         batch_size=512,
+#         epochs=15,
+#         lr=1e-4,
+#         workers=40,
+#         dataset_name=dataset_name
+#     ),
+#     stickman_encoder=dict(
+#         point_len=point_len,
+#         in_dim=point_len*2,
+#         out_dim=feat_dim,
+#         d_model=512,
+#         dropout=0.1,
+#         activation='relu',
+#         nhead=16,
+#         num_layers=5,
+#         ff_dim=1024,
+#     ),
+#     stickman_decoder=dict(
+#         in_dim=feat_dim,
+#         out_dim=norm_pose_dim,
+#         fcn_dims=[512, 512, 512, 512, 512],
+#         # bran_dims=[512, 512],
+#         dropout=0.1,
+#         candidate_num=4,
+#     ),
+#     motion_encoder=dict(
+#         in_dim=263,
+#         out_dim=feat_dim,
+#         fcn_dims=[512, 512, 512, 512, 512],
+#         dropout=0.1
+#     ),
+#     loss=dict(
+#         loss1=1.,
+#         loss2=1.,
+#         loss3=1.
+#     )
+# )
+dataset_name = "human_ml3d"
+feat_dim = 256
 
 # checkpoint saving
 checkpoint_config = dict(interval=10)
 
-dist_params = dict(backend='nccl')
-log_level = 'INFO'
+dist_params = dict(backend="nccl")
+log_level = "INFO"
 load_from = None
 resume_from = None
-workflow = [('train', 1)]
+workflow = [("train", 1)]
 
 # optimizer
-optimizer = dict(type='Adam', lr=2e-4)
+optimizer = dict(type="Adam", lr=2e-4)
 optimizer_config = dict(grad_clip=None)
 # learning policy
 # lr_config = dict(policy='CosineAnnealing', min_lr_ratio=2e-5, by_epoch=False)
-runner = dict(type='EpochBasedRunner', max_epochs=60)
+runner = dict(type="EpochBasedRunner", max_epochs=60)
 
 log_config = dict(
     interval=50,
     hooks=[
-        dict(type='TextLoggerHook'),
+        dict(type="TextLoggerHook"),
         # dict(type='TensorboardLoggerHook')
-    ])
+    ],
+)
 
 input_feats = 263
 max_seq_len = 196
@@ -74,19 +77,19 @@ time_embed_dim = 2048
 text_latent_dim = 256
 ff_size = 1024
 num_heads = 8
-dropout = 0.
+dropout = 0.0
 index_num = 3
 
 # model settings
 model = dict(
-    type='MotionDiffusion',
+    type="MotionDiffusion",
     loss_weight=dict(
         motion_w=1,
     ),
     index_num=index_num,
-    motion_crop=[4, 22*3+4],
+    motion_crop=[4, 22 * 3 + 4],
     model=dict(
-        type='ReMoDiffuseTransformer',
+        type="ReMoDiffuseTransformer",
         input_feats=input_feats,
         max_seq_len=max_seq_len,
         latent_dim=latent_dim,
@@ -94,58 +97,59 @@ model = dict(
         num_layers=6,
         condition_cfg=dict(
             text_p=0.7,
-            stick_p=0.7,
-            index_train_p = 0.7
+            joint_p=0.7,
+            # stick_p=0.7,
+            index_train_p=0.7,
         ),
         index_num=index_num,
         ca_block_cfg=dict(
-            type='SemanticsModulatedAttention',
+            type="SemanticsModulatedAttention",
             latent_dim=latent_dim,
             text_latent_dim=text_latent_dim,
             num_heads=num_heads,
             dropout=dropout,
             time_embed_dim=time_embed_dim,
-            stick_latent_dim=feat_dim
+            joint_latent_dim=feat_dim,
+            # stick_latent_dim=feat_dim
         ),
         ffn_cfg=dict(
             latent_dim=latent_dim,
             ffn_dim=ff_size,
             dropout=dropout,
-            time_embed_dim=time_embed_dim
+            time_embed_dim=time_embed_dim,
         ),
         text_encoder=dict(
-            pretrained_model='clip',
+            pretrained_model="clip",
             latent_dim=text_latent_dim,
             num_layers=2,
             ff_size=2048,
             dropout=dropout,
-            use_text_proj=False
+            use_text_proj=False,
         ),
-        multistick_encoder=dict(
-            stick_encoder = stick_set['stickman_encoder'],
-            weight='stickman/weight/real_init/t2m/stickman_encoder.ckpt',
-            d_model=feat_dim
-            ),
+        multistick_encoder=dict(d_model=feat_dim, joint_num=22),
+        # multistick_encoder=dict(
+        #     stick_encoder = stick_set['stickman_encoder'],
+        #     weight='stickman/weight/real_init/t2m/stickman_encoder.ckpt',
+        #     d_model=feat_dim
+        #     ),
         scale_func_cfg=dict(
-            coarse_scale=2.0,
-            both_coef=0.52351,
-            text_coef=-0.28419,
-            retr_coef=2.39872
-        )
+            coarse_scale=2.0, both_coef=0.52351, text_coef=-0.28419, retr_coef=2.39872
+        ),
     ),
-    loss_recon=dict(type='MSELoss', loss_weight=1, reduction='none'),
+    loss_recon=dict(type="MSELoss", loss_weight=1, reduction="none"),
     diffusion_train=dict(
-        beta_scheduler='linear',
+        beta_scheduler="linear",
         diffusion_steps=1000,
-        model_mean_type='start_x',
-        model_var_type='fixed_large',
+        model_mean_type="start_x",
+        model_var_type="fixed_large",
     ),
     diffusion_test=dict(
-        beta_scheduler='linear',
+        beta_scheduler="linear",
         diffusion_steps=1000,
-        model_mean_type='start_x',
-        model_var_type='fixed_large',
-        respace='15,15,8,6,6',
+        model_mean_type="start_x",
+        model_var_type="fixed_large",
+        respace="15,15,8,6,6",
     ),
-    inference_type='ddim'
+    inference_type="ddim",
 )
+

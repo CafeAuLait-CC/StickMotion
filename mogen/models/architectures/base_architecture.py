@@ -41,13 +41,11 @@ class BaseArchitecture(BaseModule):
             elif isinstance(loss_value, list):
                 log_vars[loss_name] = sum(_loss.mean() for _loss in loss_value)
             else:
-                raise TypeError(
-                    f'{loss_name} is not a tensor or list of tensors')
+                raise TypeError(f"{loss_name} is not a tensor or list of tensors")
 
-        loss = sum(_value for _key, _value in log_vars.items()
-                   if 'loss' in _key)
+        loss = sum(_value for _key, _value in log_vars.items() if "loss" in _key)
 
-        log_vars['loss'] = loss
+        log_vars["loss"] = loss
         for loss_name, loss_value in log_vars.items():
             # reduce loss when distributed training
             if dist.is_available() and dist.is_initialized():
@@ -83,8 +81,7 @@ class BaseArchitecture(BaseModule):
         losses = self(**data)
         loss, log_vars = self._parse_losses(losses)
 
-        outputs = dict(
-            loss=loss, log_vars=log_vars, num_samples=len(data['motion']))
+        outputs = dict(loss=loss, log_vars=log_vars, num_samples=len(data["motion"]))
 
         return outputs
 
@@ -97,8 +94,7 @@ class BaseArchitecture(BaseModule):
         losses = self(**data)
         loss, log_vars = self._parse_losses(losses)
 
-        outputs = dict(
-            loss=loss, log_vars=log_vars, num_samples=len(data['motion']))
+        outputs = dict(loss=loss, log_vars=log_vars, num_samples=len(data["motion"]))
 
         return outputs
 
@@ -107,33 +103,38 @@ class BaseArchitecture(BaseModule):
             return self.forward_train(**kwargs)
         else:
             return self.forward_test(**kwargs)
-        
+
     def split_results(self, results):
-        B = results['motion'].shape[0]
+        B = results["motion"].shape[0]
         output = []
         for i in range(B):
             batch_output = dict()
-            batch_output['specified_idx'] = to_cpu(results['specified_idx'][i])
-            batch_output['stickman_tracks'] = to_cpu(results['stickman_tracks'][i])
-            batch_output['pred_index'] = to_cpu(results['pred_index'][i])
-            batch_output['motion'] = to_cpu(results['motion'][i])
-            batch_output['pred_motion'] = to_cpu(results['pred_motion'][i])
-            batch_output['motion_length'] = to_cpu(results['motion_length'][i])
-            batch_output['motion_mask'] = to_cpu(results['motion_mask'][i])
-            if 'pred_motion_length' in results.keys():
-                batch_output['pred_motion_length'] = to_cpu(results['pred_motion_length'][i])
+            batch_output["specified_idx"] = to_cpu(results["specified_idx"][i])
+            batch_output["front_joints"] = to_cpu(results["front_joints"][i])
+            # batch_output['stickman_tracks'] = to_cpu(results['stickman_tracks'][i])
+            batch_output["pred_index"] = to_cpu(results["pred_index"][i])
+            batch_output["motion"] = to_cpu(results["motion"][i])
+            batch_output["pred_motion"] = to_cpu(results["pred_motion"][i])
+            batch_output["motion_length"] = to_cpu(results["motion_length"][i])
+            batch_output["motion_mask"] = to_cpu(results["motion_mask"][i])
+            if "pred_motion_length" in results.keys():
+                batch_output["pred_motion_length"] = to_cpu(
+                    results["pred_motion_length"][i]
+                )
             else:
-                batch_output['pred_motion_length'] = to_cpu(results['motion_length'][i])
-            if 'pred_motion_mask' in results:
-                batch_output['pred_motion_mask'] = to_cpu(results['pred_motion_mask'][i])
+                batch_output["pred_motion_length"] = to_cpu(results["motion_length"][i])
+            if "pred_motion_mask" in results:
+                batch_output["pred_motion_mask"] = to_cpu(
+                    results["pred_motion_mask"][i]
+                )
             else:
-                batch_output['pred_motion_mask'] = to_cpu(results['motion_mask'][i])
-            if 'motion_metas' in results.keys():
-                motion_metas = results['motion_metas'][i]
-                if 'text' in motion_metas.keys():
-                    batch_output['text'] = motion_metas['text']
-                if 'token' in motion_metas.keys():
-                    batch_output['token'] = motion_metas['token']
+                batch_output["pred_motion_mask"] = to_cpu(results["motion_mask"][i])
+            if "motion_metas" in results.keys():
+                motion_metas = results["motion_metas"][i]
+                if "text" in motion_metas.keys():
+                    batch_output["text"] = motion_metas["text"]
+                if "token" in motion_metas.keys():
+                    batch_output["token"] = motion_metas["token"]
             output.append(batch_output)
         return output
- 
+

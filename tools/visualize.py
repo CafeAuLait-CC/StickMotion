@@ -348,15 +348,13 @@ def parse_args():
     parser.add_argument("--motion_length", type=int, help="expected motion length")
     parser.add_argument("--out", help="output animation file")
     parser.add_argument("--pose_npy", help="output pose sequence file", default=None)
-    parser.add_argument(
-        "--stickman_path", help="path to stickman track npy file", default=None
-    )
+    parser.add_argument("--joints_path", help="path to 2D joint npy file", default=None)
     parser.add_argument(
         "--specified_idx",
         type=int,
         nargs="+",
         default=None,
-        help="indices of frames corresponding to each stickman track",
+        help="indices of frames corresponding to each joint condition",
     )
     parser.add_argument(
         "--launcher",
@@ -453,17 +451,22 @@ def main():
     getattr(model, "module", model).others_cuda()
     # model.module.others_cuda()
 
-    if args.stickman_path is not None:
-        tracks_np = np.load(args.stickman_path)
-        stickman_tracks = torch.from_numpy(tracks_np).float().unsqueeze(0).to(device)
+    # if args.stickman_path is not None:
+    #     tracks_np = np.load(args.stickman_path)
+    #     stickman_tracks = torch.from_numpy(tracks_np).float().unsqueeze(0).to(device)
+    if args.joints_path is not None:
+        joints_np = np.load(args.joints_path)
+        front_joints = torch.from_numpy(joints_np).float().unsqueeze(0).to(device)
         if args.specified_idx is None:
-            raise ValueError("--specified_idx must be provided with --stickman_path")
+            raise ValueError("--specified_idx must be provided with --joints_path")
         specified_idx = (
             torch.tensor(args.specified_idx, dtype=torch.long).unsqueeze(0).to(device)
         )
     else:
         index_num = cfg.model.index_num
-        stickman_tracks = torch.zeros(1, index_num, 6, 64, 2).to(device)
+        # stickman_tracks = torch.zeros(1, index_num, 6, 64, 2).to(device)
+        joint_num = 22 if dataset_name == "human_ml3d" else 21
+        front_joints = torch.zeros(1, index_num, joint_num, 2).to(device)
         mid = motion_length // 2
         specified_idx = (
             torch.tensor([0, mid, motion_length - 1], dtype=torch.long)
@@ -477,7 +480,7 @@ def main():
         "motion_length": motion_length_tensor,
         "motion_metas": [{"text": [text]}],
         "text": [text],
-        "stickman_tracks": stickman_tracks,
+        "front_joints": front_joints,
         "specified_idx": specified_idx,
     }
 
@@ -521,7 +524,8 @@ class VisMy:
             self.joint_num = 21
 
     def vis_seq(self, entity, out_path):
-        stickman_tracks = entity["stick_tracks"]
+        # stickman_tracks = entity["stick_tracks"]
+        front_joints = entity["front_joints"]
         pred_index = entity["pred_index"][-1]
         motion = entity["motion"]
         text = entity["text"]
@@ -576,13 +580,15 @@ class VisMy:
         ax.title.set_text(title)
         ax.title.set_fontsize(self.title_size)
 
-    def track_vis(self, track, fig, idx):
+    def track_vis(self, joints, fig, idx):
         ax = fig.add_subplot(idx)
-        for i in range(6):
-            ax.plot(track[i, :, 0], track[i, :, 1], linewidth=4, color="black")
+        # for i in range(6):
+        #     ax.plot(track[i, :, 0], track[i, :, 1], linewidth=4, color="black")
+        for chain in kit_kinematic_chain:
+            ax.plot(joints[chain, 0], joints[chain, 1], linewidth=4, color="black")
 
         ax.axis("equal")
-        ax.title.set_text("stickman")
+        ax.title.set_text("joints")
         ax.title.set_fontsize(self.title_size)
 
     def diff_vis(
