@@ -126,7 +126,7 @@ model = dict(
             dropout=dropout,
             use_text_proj=False,
         ),
-        multistick_encoder=dict(d_model=feat_dim, joint_num=22),
+        multijoint_encoder=dict(d_model=feat_dim, joint_num=22),
         # multistick_encoder=dict(
         #     stick_encoder = stick_set['stickman_encoder'],
         #     weight='stickman/weight/real_init/t2m/stickman_encoder.ckpt',
@@ -152,4 +152,3 @@ model = dict(
     ),
     inference_type="ddim",
 )
-
