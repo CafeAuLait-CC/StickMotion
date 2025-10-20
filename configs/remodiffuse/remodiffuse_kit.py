@@ -82,7 +82,7 @@ index_num = 3
 
 # model settings
 model = dict(
-    type='MotionDiffusion',
+    type='MotionFlowMatching',
     loss_weight=dict(
         # motion_w=0,
         # index_w=0
@@ -91,6 +91,13 @@ model = dict(
     ),
     index_num=index_num,
     motion_crop=[4, 21*3+4],
+    flow=dict(
+        time_scale=1000,
+        solver=dict(
+            type='euler',
+            num_steps=60,
+        ),
+    ),
     model=dict(
         type='ReMoDiffuseTransformer',
         input_feats=input_feats,
@@ -140,18 +147,4 @@ model = dict(
         )
     ),
     loss_recon=dict(type='MSELoss', loss_weight=1, reduction='none'),
-    diffusion_train=dict(
-        beta_scheduler='linear',
-        diffusion_steps=1000,
-        model_mean_type='start_x',
-        model_var_type='fixed_large',
-    ),
-    diffusion_test=dict(
-        beta_scheduler='linear',
-        diffusion_steps=1000,
-        model_mean_type='start_x',
-        model_var_type='fixed_large',
-        respace='15,15,8,6,6',
-    ),
-    inference_type='ddim'
 )

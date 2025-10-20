@@ -47,6 +47,9 @@ def parse_args():
     parser.add_argument('--motion_length', type=int, help='expected motion length')
     parser.add_argument('--out', help='output animation file')
     parser.add_argument('--pose_npy', help='output pose sequence file', default=None)
+    parser.add_argument('--stickman', help='path to stickman track npy file', default=None)
+    parser.add_argument('--specified-idx', nargs='*', type=int, dest='specified_idx', help='indices for stickman supervision')
+    parser.add_argument('--num-steps', type=int, default=None, help='number of flow solver steps for inference')
     parser.add_argument(
         '--launcher',
         choices=['none', 'pytorch', 'slurm', 'mpi'],
@@ -89,12 +92,15 @@ def main():
         wrap_fp16_model(model)
     load_checkpoint(model, args.checkpoint, map_location='cpu')
 
+    device = torch.device(args.device)
     if args.device == 'cpu':
         model = model.cpu()
     else:
         model = MMDataParallel(model, device_ids=[0])
+    model = model.to(device)
     model.eval()
-    
+    model_module = model.module if hasattr(model, 'module') else model
+
     dataset_name = cfg.data.test.dataset_name
     print("dataset_name",dataset_name)
     if dataset_name == 'human_ml3d':
@@ -110,29 +116,67 @@ def main():
         mean = np.load(mean_path)
         std = np.load(std_path)
          
-    device = args.device
-    text = args.text
+    text = args.text or ""
     motion_length = args.motion_length
     if dataset_name == 'human_ml3d':
-        motion = torch.zeros(1, motion_length, 263).to(device)
+        motion = torch.zeros(1, motion_length, 263, device=device)
     else:
-        motion = torch.zeros(1, motion_length, 251).to(device)
-    motion_mask = torch.ones(1, motion_length).to(device)
-    motion_length = torch.Tensor([motion_length]).long().to(device)
-    model = model.to(device)
-    model.module.others_cuda()
-    
+        motion = torch.zeros(1, motion_length, 251, device=device)
+    motion_mask = torch.ones(1, motion_length, device=device)
+    motion_length_tensor = torch.tensor([[motion_length]], device=device, dtype=torch.long)
+
+    index_num = cfg.model.index_num
+    stick_cfg = cfg.model.model.multistick_encoder.stick_encoder
+    point_len = stick_cfg.point_len
+    expected_inner_shape = (6, point_len, 2)
+
+    if args.stickman is not None:
+        stickman_tracks_np = np.load(args.stickman)
+    else:
+        stickman_tracks_np = np.zeros((index_num,) + expected_inner_shape, dtype=np.float32)
+
+    stickman_tracks_np = np.asarray(stickman_tracks_np, dtype=np.float32)
+    if stickman_tracks_np.ndim == 3 and stickman_tracks_np.shape == expected_inner_shape:
+        stickman_tracks_np = np.repeat(stickman_tracks_np[np.newaxis, ...], index_num, axis=0)
+    if stickman_tracks_np.ndim == 4 and stickman_tracks_np.shape[0] == index_num:
+        stickman_tracks_np = stickman_tracks_np[np.newaxis, ...]
+    elif stickman_tracks_np.ndim == 5 and stickman_tracks_np.shape[1] == index_num:
+        pass
+    else:
+        raise ValueError(
+            f"stickman track shape {stickman_tracks_np.shape} does not match expected {(index_num,) + expected_inner_shape}."
+        )
+    if stickman_tracks_np.shape[-3:] != expected_inner_shape:
+        raise ValueError(
+            f"stickman track inner shape {stickman_tracks_np.shape[-3:]} does not match expected {expected_inner_shape}."
+        )
+    stickman_tracks = torch.from_numpy(stickman_tracks_np).to(device)
+
+    if args.specified_idx is not None and len(args.specified_idx) > 0:
+        if len(args.specified_idx) != index_num:
+            raise ValueError(f"Expected {index_num} specified indices, got {len(args.specified_idx)}")
+        specified_idx = torch.tensor([args.specified_idx], device=device, dtype=torch.long)
+    else:
+        default_idx = np.linspace(0, motion_length - 1, index_num, dtype=int).tolist()
+        specified_idx = torch.tensor([default_idx], device=device, dtype=torch.long)
+
+    model_module.others_cuda()
+
+    inference_kwargs = {}
+    if args.num_steps is not None:
+        inference_kwargs['solver'] = {'num_steps': args.num_steps}
+
     input = {
         'motion': motion,
         'motion_mask': motion_mask,
-        'motion_length': motion_length,
+        'motion_length': motion_length_tensor,
         'motion_metas': [{'text': text}],
+        'stickman_tracks': stickman_tracks,
+        'specified_idx': specified_idx,
+        'inference_kwargs': inference_kwargs,
     }
 
-    all_pred_motion = []
     with torch.no_grad():
-        input['inference_kwargs'] = {}
-        output_list = []
         output = model(**input)[0]['pred_motion']
         pred_motion = output.cpu().detach().numpy()
         pred_motion = pred_motion * std + mean
