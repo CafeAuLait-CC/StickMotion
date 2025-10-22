@@ -292,7 +292,7 @@ def plot_single_frame(
         ax.set_zlim(mid_z - max_range, mid_z + max_range)
 
     # Set consistent view
-    ax.view_init(elev=15, azim=45)
+    ax.view_init(elev=0, azim=100)
 
     # Save frame
     frame_path = os.path.join(frame_dir, f"frame_{frame_idx:04d}.png")
@@ -365,7 +365,7 @@ def parse_args():
     parser.add_argument("--local_rank", type=int, default=0)
     parser.add_argument(
         "--device",
-        choices=["cpu", "cuda"],
+        choices=["cpu", "cuda", "cuda:0", "cuda:1"],
         default="cuda",
         help="device used for testing",
     )
