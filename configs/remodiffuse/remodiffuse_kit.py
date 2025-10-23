@@ -58,7 +58,7 @@ workflow = [('train', 1)]
 
 # optimizer
 optimizer = dict(type='Adam', lr=2e-4)
-lr_scheduler = dict(milestone_ratios=[5/6], gamma=0.1)
+lr_scheduler = dict(milestone_ratios=[0.5, 5/6], gamma=0.1)
 optimizer_config = dict(grad_clip=None)
 # learning policy
 # lr_config = dict(policy='CosineAnnealing', min_lr_ratio=0, by_epoch=False)
