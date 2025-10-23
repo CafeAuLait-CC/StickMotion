@@ -31,9 +31,36 @@ class LgModel(LightningModule):
 
     def configure_optimizers(self):
         optimizer = build_optimizers(self.model, self.cfg.optimizer)
-        # lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=self.trainer.max_epochs*2)
-        milestone = 5/6 * self.trainer.max_epochs
-        lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[milestone], gamma=0.1)
+
+        scheduler_cfg = getattr(self.cfg, 'lr_scheduler', None)
+        if scheduler_cfg is None:
+            milestone_ratios = [5 / 6]
+            gamma = 0.1
+            raw_milestones = [ratio * self.trainer.max_epochs for ratio in milestone_ratios]
+        else:
+            gamma = scheduler_cfg.get('gamma', 0.1)
+            if 'milestones' in scheduler_cfg:
+                raw_milestones = scheduler_cfg['milestones']
+            else:
+                milestone_ratios = scheduler_cfg.get('milestone_ratios', [5 / 6])
+                raw_milestones = [ratio * self.trainer.max_epochs for ratio in milestone_ratios]
+
+        milestones = sorted(
+            {
+                int(round(milestone))
+                for milestone in raw_milestones
+                if 0 < milestone < self.trainer.max_epochs
+            }
+        )
+
+        if not milestones:
+            return [optimizer], []
+
+        lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(
+            optimizer,
+            milestones=milestones,
+            gamma=gamma,
+        )
         return [optimizer], [lr_scheduler]
 
     def training_step(self, batch, batch_idx):
