@@ -1,3 +1,6 @@
+import math
+import time
+
 import torch
 
 from .base_architecture import BaseArchitecture
@@ -34,6 +37,12 @@ class MotionFlowMatching(BaseArchitecture):
         flow = flow or {}
         solver = flow.get("solver", {})
         self.time_scale = float(flow.get("time_scale", 1000.0))
+        path_cfg = flow.get("path", {})
+        self.path_type = path_cfg.get("type", "rectified").lower()
+        if self.path_type not in {"rectified", "linear"}:
+            raise ValueError(f"Unsupported flow path type '{self.path_type}'.")
+        self.path_exponent = float(path_cfg.get("exponent", 2.0))
+        self.path_epsilon = float(path_cfg.get("epsilon", 1e-4))
         self.default_solver_steps = int(solver.get("num_steps", 50))
         self.default_solver_type = solver.get("type", "euler").lower()
 
@@ -68,6 +77,30 @@ class MotionFlowMatching(BaseArchitecture):
     def others_cuda(self):
         device = next(self.model.parameters()).device
         self.model.to(device)
+
+    # ------------------------------------------------------------------
+    # path helpers
+    # ------------------------------------------------------------------
+    def _scale_time(self, t):
+        return t * self.time_scale
+
+    def _alpha(self, t):
+        if self.path_type == "rectified":
+            return t.pow(self.path_exponent)
+        return t
+
+    def _alpha_dot(self, t):
+        if self.path_type == "rectified":
+            exponent = self.path_exponent
+            if math.isclose(exponent, 1.0):
+                return torch.ones_like(t)
+            return exponent * t.clamp_min(0).pow(exponent - 1)
+        return torch.ones_like(t)
+
+    def _clamp_t(self, t):
+        if self.path_epsilon <= 0:
+            return t
+        return t.clamp(self.path_epsilon, 1.0 - self.path_epsilon)
 
     # ------------------------------------------------------------------
     # core forward
@@ -148,10 +181,11 @@ class MotionFlowMatching(BaseArchitecture):
         B = motion.shape[0]
 
         base_sample = torch.randn_like(motion)
-        t = torch.rand(B, device=device)
-        # Linear conditional flow path: x_t = (1 - t) * x0 + t * x1
-        xt = (1.0 - t)[:, None, None] * base_sample + t[:, None, None] * motion
-        scaled_t = t * self.time_scale
+        t = self._clamp_t(torch.rand(B, device=device))
+        alpha = self._alpha(t)
+        alpha_dot = self._alpha_dot(t)
+        xt = (1.0 - alpha)[:, None, None] * base_sample + alpha[:, None, None] * motion
+        scaled_t = self._scale_time(t)
 
         pred_velocity, index, p_batch, stick_mask = self.model(
             xt,
@@ -164,12 +198,17 @@ class MotionFlowMatching(BaseArchitecture):
             sample_idx=sample_idx,
             clip_feat=clip_feat,
         )
-        pred = base_sample + pred_velocity
+
+        alpha_dot = alpha_dot[:, None, None]
+        safe_alpha_dot = alpha_dot.clamp_min(1e-4)
+        pred_motion = base_sample + pred_velocity / safe_alpha_dot
         target = motion
+        target_velocity = alpha_dot * (motion - base_sample)
 
         all_loss = 0.0
         loss = {}
-        all_loss_batch = self.loss_recon(pred, target, reduction_override="none")
+        all_loss_batch = self.loss_recon(pred_motion, target, reduction_override="none")
+        velocity_loss_batch = self.loss_recon(pred_velocity, target_velocity, reduction_override="none")
         specified_motion = motion[torch.arange(B, device=device)[:, None], specified_idx, :]
 
         loss_item = ["text_loss", "both_loss", "stick_loss", "none_loss"]
@@ -183,7 +222,7 @@ class MotionFlowMatching(BaseArchitecture):
             segment_slice = slice(start, start + batch)
             if loss_item[i] in {"both_loss", "stick_loss"}:
                 spec_m = specified_motion[segment_slice, :, self.motion_start : self.motion_end]
-                pred_m = pred[segment_slice, :, self.motion_start : self.motion_end]
+                pred_m = pred_motion[segment_slice, :, self.motion_start : self.motion_end]
                 spec_loss = []
                 for j in range(self.index_num):
                     diff = (spec_m[:, j, None] - pred_m).pow(2).mean(-1)
@@ -192,9 +231,13 @@ class MotionFlowMatching(BaseArchitecture):
                     spec_loss.append(((diff * w_m).sum(-1) * stick_cond_mask).sum() / batch)
                 loss[f"identity_{loss_item[i]}"] = sum(spec_loss) / len(spec_loss)
                 all_loss = all_loss + batch / all_batch * loss[f"identity_{loss_item[i]}"] * self.loss_weight.get("motion_w", 1.0)
-            masked_mse = (
+            motion_term = (
                 all_loss_batch[segment_slice].mean(-1) * motion_mask[segment_slice]
             ).sum() / motion_mask[segment_slice].sum()
+            velocity_term = (
+                velocity_loss_batch[segment_slice].mean(-1) * motion_mask[segment_slice]
+            ).sum() / motion_mask[segment_slice].sum()
+            masked_mse = 0.5 * (motion_term + velocity_term)
             loss[loss_item[i]] = masked_mse
             all_loss = all_loss + batch / all_batch * masked_mse
             start += batch
@@ -232,7 +275,7 @@ class MotionFlowMatching(BaseArchitecture):
             t_cur = step_times[i]
             t_next = step_times[i + 1]
             dt = t_next - t_cur
-            t_batch = torch.full((x.shape[0],), t_cur * self.time_scale, device=device)
+            t_batch = torch.full((x.shape[0],), self._scale_time(t_cur), device=device)
             velocity, index = self.model(
                 x,
                 t_batch,
@@ -278,6 +321,10 @@ class MotionFlowMatching(BaseArchitecture):
             raise NotImplementedError(f"Base distribution '{base}' is not supported.")
         x = torch.randn(B, T, D, device=device)
 
+        if device.type == "cuda":
+            torch.cuda.synchronize(device)
+        start_time = time.perf_counter()
+
         pred_motion, pred_index = self._flow_solver(
             x,
             motion_mask,
@@ -290,6 +337,11 @@ class MotionFlowMatching(BaseArchitecture):
             inference_kwargs,
         )
 
+        if device.type == "cuda":
+            torch.cuda.synchronize(device)
+        elapsed = time.perf_counter() - start_time
+        per_sample_time = elapsed / max(B, 1)
+
         if getattr(self.model, "post_process", None) is not None:
             pred_motion = self.model.post_process(pred_motion)
 
@@ -297,4 +349,5 @@ class MotionFlowMatching(BaseArchitecture):
         results.pop("return_loss", None)
         results["pred_motion"] = pred_motion
         results["pred_index"] = pred_index
+        results["inference_time"] = pred_motion.new_full((B,), per_sample_time)
         return self.split_results(results)

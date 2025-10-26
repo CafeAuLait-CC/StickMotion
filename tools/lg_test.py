@@ -83,15 +83,17 @@ def main():
         pid_seed = os.getppid()
     model = LgModel(cfg, dataset, unit=hashlib.md5(str(pid_seed).encode()).hexdigest()[:8])
     test_loader = DataLoader(dataset, batch_size=cfg.data.samples_per_gpu, shuffle=False, num_workers=cfg.data.workers_per_gpu, collate_fn=collate_fn)
-    trainer = Trainer(accelerator="gpu", 
+    trainer = Trainer(accelerator="gpu",
                       strategy=DDPStrategy(),
                     #   devices=[0],
                       devices=parse_gpu(args.gpu),
-                      logger=False, 
+                      logger=False,
                     #   max_steps=3,
                       precision='16-mixed',
                       )
     trainer.validate(model, test_loader, ckpt_path=args.ckpt)
+    if getattr(model, 'last_aits', None) is not None:
+        print(f'\nAverage inference time per sample: {model.last_aits:.6f}s')
 
 
 if __name__ == '__main__':

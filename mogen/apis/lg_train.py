@@ -18,6 +18,7 @@ class LgModel(LightningModule):
         self.dataset = dataset
         self.outputs = []
         self.unit = unit
+        self.last_aits = None
 
     
     def on_train_epoch_start(self) -> None:
@@ -95,7 +96,16 @@ class LgModel(LightningModule):
                 ordered_results.extend(list(res))
             ordered_results = ordered_results[:len(self.dataset)]
             print(f'StiSim:{1-evalute_sim(ordered_results, joints_num=21)/evalute_mean(ordered_results, joints_num=21)}')
+            inference_times = [res.get('inference_time', 0.0) for res in ordered_results if 'inference_time' in res]
+            avg_inference = sum(inference_times) / len(inference_times) if inference_times else 0.0
+            if inference_times:
+                print(f'\nAITS : {avg_inference:.6f}s')
+                self.last_aits = avg_inference
+            else:
+                self.last_aits = None
             results = self.dataset.evaluate(ordered_results)
+            if inference_times:
+                results['AITS'] = avg_inference
             for k, v in results.items():
                 print(f'\n{k} : {v:.4f}')
 

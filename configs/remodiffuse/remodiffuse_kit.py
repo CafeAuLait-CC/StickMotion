@@ -94,6 +94,11 @@ model = dict(
     motion_crop=[4, 21*3+4],
     flow=dict(
         time_scale=1000,
+        path=dict(
+            type='rectified',
+            exponent=2.0,
+            epsilon=1e-4,
+        ),
         solver=dict(
             type='euler',
             num_steps=60,
