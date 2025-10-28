@@ -11,7 +11,7 @@ from pathlib import Path
 import mmcv
 import torch
 from torch.utils.data import DataLoader
-from mmcv import Config, DictAction
+from mmcv import Config, ConfigDict, DictAction
 from mmcv.runner import get_dist_info, init_dist
 
 from mogen import __version__
@@ -40,11 +40,68 @@ class UnParaCallback(Callback):
             if param.grad is None:
                 print(name)
                 
+MODEL_CHOICES = ("diffusion", "flowmatching", "rectified", "meanflow")
+
+
+def apply_model_override(cfg, model_name):
+    """Mutate the config so it instantiates the requested model."""
+
+    choice = model_name.lower()
+    if choice not in MODEL_CHOICES:
+        raise ValueError(f"Unsupported model '{model_name}'. Available: {MODEL_CHOICES}.")
+
+    if choice == "diffusion":
+        cfg.model.type = "MotionDiffusion"
+        if hasattr(cfg.model, "pop"):
+            cfg.model.pop("flow", None)
+        elif "flow" in cfg.model:
+            del cfg.model["flow"]
+        return
+
+    # Flow-based variants share the MotionFlowMatching architecture.
+    flow_kind_map = {
+        "flowmatching": "linear",
+        "rectified": "rectified",
+        "meanflow": "meanflow",
+    }
+
+    cfg.model.type = "MotionFlowMatching"
+    flow_cfg = cfg.model.get("flow")
+    if flow_cfg is None:
+        flow_cfg = ConfigDict()
+        cfg.model.flow = flow_cfg
+    elif not isinstance(flow_cfg, ConfigDict):
+        flow_cfg = ConfigDict(flow_cfg)
+        cfg.model.flow = flow_cfg
+
+    flow_cfg.kind = flow_kind_map[choice]
+
+    path_cfg = flow_cfg.get("path")
+    if path_cfg is None:
+        path_cfg = ConfigDict()
+        flow_cfg.path = path_cfg
+    elif not isinstance(path_cfg, ConfigDict):
+        path_cfg = ConfigDict(path_cfg)
+        flow_cfg.path = path_cfg
+
+    if flow_cfg.kind == "linear":
+        path_cfg.type = "linear"
+    else:
+        # Rectified and meanflow defaults share the rectified schedule.
+        path_cfg.type = "rectified"
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description='Train a model')
     parser.add_argument('config', help='train config file path')
     parser.add_argument('version', help='the version to save logs and models')
     parser.add_argument('gpu', help='-1: 0,1,2,3; -2: 4,5,6,7; else: set to gpu directly')
+    parser.add_argument(
+        '--model',
+        choices=MODEL_CHOICES,
+        default=None,
+        help='Override the model family defined in the config.',
+    )
     args = parser.parse_args()
 
     return args
@@ -80,6 +137,10 @@ def main():
     # seed_everything(123)
 
     cfg = Config.fromfile(args.config)
+    # optionally override the model family
+    if args.model is not None:
+        apply_model_override(cfg, args.model)
+
     # set cudnn_benchmark
     if cfg.get('cudnn_benchmark', False):
         torch.backends.cudnn.benchmark = True

@@ -8,7 +8,7 @@ sys.path.insert(0, workspace_path)
 from pathlib import Path
 import torch
 from torch.utils.data import DataLoader
-from mmcv import Config, DictAction
+from mmcv import Config, ConfigDict, DictAction
 from mmcv.runner import get_dist_info, init_dist
 
 from mogen import __version__
@@ -27,10 +27,68 @@ import hashlib
 torch.set_float32_matmul_precision('high')
 
 
+MODEL_CHOICES = ("diffusion", "flowmatching", "rectified", "meanflow")
+
+
+def apply_model_override(cfg, model_name):
+    choice = model_name.lower()
+    if choice not in MODEL_CHOICES:
+        raise ValueError(f"Unsupported model '{model_name}'. Available: {MODEL_CHOICES}.")
+
+    if choice == "diffusion":
+        cfg.model.type = "MotionDiffusion"
+        if hasattr(cfg.model, "pop"):
+            cfg.model.pop("flow", None)
+        elif "flow" in cfg.model:
+            del cfg.model["flow"]
+        return
+
+    flow_kind_map = {
+        "flowmatching": "linear",
+        "rectified": "rectified",
+        "meanflow": "meanflow",
+    }
+
+    cfg.model.type = "MotionFlowMatching"
+    flow_cfg = cfg.model.get("flow")
+    if flow_cfg is None:
+        flow_cfg = ConfigDict()
+        cfg.model.flow = flow_cfg
+    elif not isinstance(flow_cfg, ConfigDict):
+        flow_cfg = ConfigDict(flow_cfg)
+        cfg.model.flow = flow_cfg
+
+    flow_cfg.kind = flow_kind_map[choice]
+
+    path_cfg = flow_cfg.get("path")
+    if path_cfg is None:
+        path_cfg = ConfigDict()
+        flow_cfg.path = path_cfg
+    elif not isinstance(path_cfg, ConfigDict):
+        path_cfg = ConfigDict(path_cfg)
+        flow_cfg.path = path_cfg
+
+    if flow_cfg.kind == "linear":
+        path_cfg.type = "linear"
+    else:
+        path_cfg.type = "rectified"
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description='test a ckpt')
     parser.add_argument('ckpt', help='checkpoint file path')
     parser.add_argument('gpu', help='-1: 0,1,2,3; -2: 4,5,6,7; else: set to gpu directly')
+    parser.add_argument(
+        '--config',
+        default=None,
+        help='Config file to load. Defaults to the config saved next to the checkpoint or the KIT config.',
+    )
+    parser.add_argument(
+        '--model',
+        choices=MODEL_CHOICES,
+        default=None,
+        help='Override the model family defined in the config.',
+    )
     args = parser.parse_args()
 
     return args
@@ -65,11 +123,19 @@ def main():
     seed_everything(123, workers=True)
     args = parse_args()
     args.work_dir = Path(args.ckpt).parent
-    # args.config = args.work_dir / 'remodiffuse_t2m.py'
-    # args.config = args.work_dir / 'remodiffuse_kit.py'
-    args.config = 'configs/remodiffuse/remodiffuse_kit.py'
+    if args.config is not None:
+        config_path = args.config
+    else:
+        # try to reuse the config dumped alongside the checkpoint
+        py_files = sorted(p for p in args.work_dir.glob('*.py') if p.is_file())
+        if py_files:
+            config_path = str(py_files[0])
+        else:
+            config_path = 'configs/remodiffuse/remodiffuse_kit.py'
 
-    cfg = Config.fromfile(args.config)
+    cfg = Config.fromfile(config_path)
+    if args.model is not None:
+        apply_model_override(cfg, args.model)
     cfg.data.test.test_mode = True
     # set cudnn_benchmark
     if cfg.get('cudnn_benchmark', False):
