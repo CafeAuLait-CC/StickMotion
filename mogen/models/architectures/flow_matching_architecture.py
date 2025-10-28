@@ -37,12 +37,40 @@ class MotionFlowMatching(BaseArchitecture):
         flow = flow or {}
         solver = flow.get("solver", {})
         self.time_scale = float(flow.get("time_scale", 1000.0))
+        self.flow_kind = flow.get("kind", "rectified").lower()
+        if self.flow_kind not in {"rectified", "linear", "naive", "meanflow"}:
+            raise ValueError(f"Unsupported flow kind '{self.flow_kind}'.")
+
+        # Alias "naive" to the original linear path for backwards compatibility.
+        if self.flow_kind == "naive":
+            self.flow_kind = "linear"
+
         path_cfg = flow.get("path", {})
         self.path_type = path_cfg.get("type", "rectified").lower()
         if self.path_type not in {"rectified", "linear"}:
             raise ValueError(f"Unsupported flow path type '{self.path_type}'.")
         self.path_exponent = float(path_cfg.get("exponent", 2.0))
         self.path_epsilon = float(path_cfg.get("epsilon", 1e-4))
+        if self.path_type == "rectified" and self.path_epsilon <= 0:
+            raise ValueError("rectified paths require path.epsilon > 0 to avoid undefined derivatives.")
+
+        self.alpha_dot_floor = float(flow.get("alpha_dot_floor", 1e-12))
+
+        objective_cfg = flow.get("objective", {})
+        motion_weight = float(objective_cfg.get("motion", 1.0))
+        velocity_weight = float(objective_cfg.get("velocity", 1.0))
+        total = motion_weight + velocity_weight
+        if total <= 0:
+            raise ValueError("At least one of motion or velocity objective weights must be positive.")
+        self.motion_loss_weight = motion_weight / total
+        self.velocity_loss_weight = velocity_weight / total
+
+        variance_cfg = flow.get("variance", {})
+        self.variance_type = variance_cfg.get("type", "alpha").lower()
+        if self.variance_type not in {"alpha", "linear"}:
+            raise ValueError(f"Unsupported variance schedule '{self.variance_type}'.")
+        self.variance_floor = float(variance_cfg.get("floor", 1e-4))
+
         self.default_solver_steps = int(solver.get("num_steps", 50))
         self.default_solver_type = solver.get("type", "euler").lower()
 
@@ -101,6 +129,14 @@ class MotionFlowMatching(BaseArchitecture):
         if self.path_epsilon <= 0:
             return t
         return t.clamp(self.path_epsilon, 1.0 - self.path_epsilon)
+
+    def _sigma(self, alpha):
+        if self.variance_type == "alpha":
+            variance = 1.0 - alpha.pow(2)
+        else:
+            variance = 1.0 - alpha
+        variance = torch.clamp(variance, min=self.variance_floor)
+        return variance.sqrt()
 
     # ------------------------------------------------------------------
     # core forward
@@ -184,7 +220,13 @@ class MotionFlowMatching(BaseArchitecture):
         t = self._clamp_t(torch.rand(B, device=device))
         alpha = self._alpha(t)
         alpha_dot = self._alpha_dot(t)
-        xt = (1.0 - alpha)[:, None, None] * base_sample + alpha[:, None, None] * motion
+
+        if self.flow_kind == "meanflow":
+            sigma = self._sigma(alpha)[:, None, None]
+            xt = alpha[:, None, None] * motion + sigma * base_sample
+        else:
+            xt = (1.0 - alpha)[:, None, None] * base_sample + alpha[:, None, None] * motion
+
         scaled_t = self._scale_time(t)
 
         pred_velocity, index, p_batch, stick_mask = self.model(
@@ -199,11 +241,20 @@ class MotionFlowMatching(BaseArchitecture):
             clip_feat=clip_feat,
         )
 
-        alpha_dot = alpha_dot[:, None, None]
-        safe_alpha_dot = alpha_dot.clamp_min(1e-4)
-        pred_motion = base_sample + pred_velocity / safe_alpha_dot
-        target = motion
-        target_velocity = alpha_dot * (motion - base_sample)
+        if self.flow_kind == "meanflow":
+            pred_motion = xt + pred_velocity
+            target = alpha[:, None, None] * motion
+            target_velocity = target - xt
+        else:
+            alpha_dot = alpha_dot[:, None, None]
+            denom = torch.where(
+                alpha_dot.abs() < self.alpha_dot_floor,
+                alpha_dot.new_full(alpha_dot.shape, self.alpha_dot_floor),
+                alpha_dot,
+            )
+            pred_motion = base_sample + pred_velocity / denom
+            target = motion
+            target_velocity = alpha_dot * (motion - base_sample)
 
         all_loss = 0.0
         loss = {}
@@ -231,13 +282,26 @@ class MotionFlowMatching(BaseArchitecture):
                     spec_loss.append(((diff * w_m).sum(-1) * stick_cond_mask).sum() / batch)
                 loss[f"identity_{loss_item[i]}"] = sum(spec_loss) / len(spec_loss)
                 all_loss = all_loss + batch / all_batch * loss[f"identity_{loss_item[i]}"] * self.loss_weight.get("motion_w", 1.0)
-            motion_term = (
-                all_loss_batch[segment_slice].mean(-1) * motion_mask[segment_slice]
-            ).sum() / motion_mask[segment_slice].sum()
-            velocity_term = (
-                velocity_loss_batch[segment_slice].mean(-1) * motion_mask[segment_slice]
-            ).sum() / motion_mask[segment_slice].sum()
-            masked_mse = 0.5 * (motion_term + velocity_term)
+            motion_term = None
+            if self.motion_loss_weight > 0:
+                motion_term = (
+                    all_loss_batch[segment_slice].mean(-1) * motion_mask[segment_slice]
+                ).sum() / motion_mask[segment_slice].sum()
+                loss[f"{loss_item[i]}_motion"] = motion_term
+
+            velocity_term = None
+            if self.velocity_loss_weight > 0:
+                velocity_term = (
+                    velocity_loss_batch[segment_slice].mean(-1) * motion_mask[segment_slice]
+                ).sum() / motion_mask[segment_slice].sum()
+                loss[f"{loss_item[i]}_velocity"] = velocity_term
+
+            masked_mse = 0.0
+            if motion_term is not None:
+                masked_mse += self.motion_loss_weight * motion_term
+            if velocity_term is not None:
+                masked_mse += self.velocity_loss_weight * velocity_term
+
             loss[loss_item[i]] = masked_mse
             all_loss = all_loss + batch / all_batch * masked_mse
             start += batch
@@ -351,3 +415,35 @@ class MotionFlowMatching(BaseArchitecture):
         results["pred_index"] = pred_index
         results["inference_time"] = pred_motion.new_full((B,), per_sample_time)
         return self.split_results(results)
+
+
+@ARCHITECTURES.register_module()
+class MotionNaiveFlowMatching(MotionFlowMatching):
+    """Linear (a.k.a. naive) flow-matching variant."""
+
+    def __init__(self, flow=None, **kwargs):
+        flow_cfg = dict(flow or {})
+        flow_cfg.setdefault("kind", "linear")
+        flow_cfg.setdefault("path", {}).setdefault("type", "linear")
+        super().__init__(flow=flow_cfg, **kwargs)
+
+
+@ARCHITECTURES.register_module()
+class MotionRectifiedFlowMatching(MotionFlowMatching):
+    """Rectified flow-matching variant with velocity supervision."""
+
+    def __init__(self, flow=None, **kwargs):
+        flow_cfg = dict(flow or {})
+        flow_cfg.setdefault("kind", "rectified")
+        flow_cfg.setdefault("path", {}).setdefault("type", "rectified")
+        super().__init__(flow=flow_cfg, **kwargs)
+
+
+@ARCHITECTURES.register_module()
+class MotionMeanFlowMatching(MotionFlowMatching):
+    """MeanFlow-style supervision with optional rectified time reparameterisation."""
+
+    def __init__(self, flow=None, **kwargs):
+        flow_cfg = dict(flow or {})
+        flow_cfg.setdefault("kind", "meanflow")
+        super().__init__(flow=flow_cfg, **kwargs)

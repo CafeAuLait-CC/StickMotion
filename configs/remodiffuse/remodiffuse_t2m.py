@@ -87,11 +87,20 @@ model = dict(
     index_num=index_num,
     motion_crop=[4, 22*3+4],
     flow=dict(
+        kind='rectified',
         time_scale=1000,
         path=dict(
             type='rectified',
             exponent=2.0,
             epsilon=1e-4,
+        ),
+        objective=dict(
+            motion=1.0,
+            velocity=1.0,
+        ),
+        variance=dict(
+            type='alpha',
+            floor=1e-4,
         ),
         solver=dict(
             type='euler',
