@@ -161,14 +161,15 @@ class MotionDiffusion(BaseArchitecture):
             return loss
         else:
             dim_pose = kwargs['motion'].shape[-1]
+            if motion.device.type == "cuda":
+                torch.cuda.synchronize(motion.device)
+            start_time = time.perf_counter()
+
             model_kwargs = self.model.get_precompute_condition(device=motion.device,  **kwargs)
             model_kwargs['motion_mask'] = motion_mask
             model_kwargs['sample_idx'] = sample_idx
             model_kwargs['motion_length'] = kwargs['motion_length']
             inference_kwargs = kwargs.get('inference_kwargs', {})
-            if motion.device.type == "cuda":
-                torch.cuda.synchronize(motion.device)
-            start_time = time.perf_counter()
 
             if self.inference_type == 'ddpm':
                 output = self.diffusion_test.p_sample_loop(
