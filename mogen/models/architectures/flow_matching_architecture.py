@@ -26,7 +26,12 @@ class MotionFlowMatching(BaseArchitecture):
         motion_crop=None,
         **kwargs,
     ):
-        super().__init__(init_cfg=init_cfg, **kwargs)
+        # ``kwargs`` may contain configuration entries intended for other
+        # architectures (e.g., ``diffusion_train`` when toggling models from
+        # the CLI).  ``BaseArchitecture`` does not accept arbitrary keyword
+        # arguments, so avoid forwarding them and only pass the supported
+        # ``init_cfg``.
+        super().__init__(init_cfg=init_cfg)
         self.model = build_submodule(model)
         self.loss_recon = build_loss(loss_recon)
         self.loss_weight = loss_weight or {}
