@@ -1,3 +1,5 @@
+import time
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -164,6 +166,10 @@ class MotionDiffusion(BaseArchitecture):
             model_kwargs['sample_idx'] = sample_idx
             model_kwargs['motion_length'] = kwargs['motion_length']
             inference_kwargs = kwargs.get('inference_kwargs', {})
+            if motion.device.type == "cuda":
+                torch.cuda.synchronize(motion.device)
+            start_time = time.perf_counter()
+
             if self.inference_type == 'ddpm':
                 output = self.diffusion_test.p_sample_loop(
                     self.model,
@@ -185,9 +191,14 @@ class MotionDiffusion(BaseArchitecture):
                 )
             if getattr(self.model, "post_process") is not None:
                 output = self.model.post_process(output)
+            if motion.device.type == "cuda":
+                torch.cuda.synchronize(motion.device)
+            elapsed = time.perf_counter() - start_time
+            per_sample_time = elapsed / max(B, 1)
             results = kwargs
             results['pred_motion'] = output["sample"]
             results['pred_index'] = output["index"]
+            results['inference_time'] = output["sample"].new_full((B,), per_sample_time)
             results = self.split_results(results)
             return results
 
