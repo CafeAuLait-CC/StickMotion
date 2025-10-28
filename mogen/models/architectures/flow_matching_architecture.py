@@ -449,4 +449,7 @@ class MotionMeanFlowMatching(MotionFlowMatching):
     def __init__(self, flow=None, **kwargs):
         flow_cfg = dict(flow or {})
         flow_cfg.setdefault("kind", "meanflow")
+        # MeanFlow benefits from the rectified (ReFlow-style) schedule by default.
+        path_cfg = flow_cfg.setdefault("path", {})
+        path_cfg.setdefault("type", "rectified")
         super().__init__(flow=flow_cfg, **kwargs)
