@@ -156,4 +156,18 @@ model = dict(
         )
     ),
     loss_recon=dict(type='MSELoss', loss_weight=1, reduction='none'),
+    diffusion_train=dict(
+        beta_scheduler='linear',
+        diffusion_steps=1000,
+        model_mean_type='start_x',
+        model_var_type='fixed_large',
+    ),
+    diffusion_test=dict(
+        beta_scheduler='linear',
+        diffusion_steps=1000,
+        model_mean_type='start_x',
+        model_var_type='fixed_large',
+        respace='15,15,8,6,6',
+    ),
+    inference_type='ddim'
 )
