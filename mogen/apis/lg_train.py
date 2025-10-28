@@ -19,6 +19,7 @@ class LgModel(LightningModule):
         self.outputs = []
         self.unit = unit
         self.last_aits = None
+        self.last_solver_steps = None
 
     
     def on_train_epoch_start(self) -> None:
@@ -103,6 +104,13 @@ class LgModel(LightningModule):
                 self.last_aits = avg_inference
             else:
                 self.last_aits = None
+            solver_steps = [res.get('solver_steps') for res in ordered_results if 'solver_steps' in res]
+            if solver_steps:
+                avg_steps = sum(solver_steps) / len(solver_steps)
+                print(f'\nAverage solver steps : {avg_steps:.2f}')
+                self.last_solver_steps = avg_steps
+            else:
+                self.last_solver_steps = None
             results = self.dataset.evaluate(ordered_results)
             if inference_times:
                 results['AITS'] = avg_inference

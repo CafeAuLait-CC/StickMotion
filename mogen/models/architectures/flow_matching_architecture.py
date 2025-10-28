@@ -82,6 +82,7 @@ class MotionFlowMatching(BaseArchitecture):
             self._stickman_shape = (self.index_num, 6, point_len, 2)
         else:
             self._stickman_shape = None
+        self.last_solver_steps = None
 
     # ------------------------------------------------------------------
     # helper utilities
@@ -334,6 +335,7 @@ class MotionFlowMatching(BaseArchitecture):
             sample_idx=sample_idx,
             clip_feat=clip_feat,
         )
+        self.last_solver_steps = steps
         step_times = torch.linspace(0.0, 1.0, steps + 1, device=device)
         for i in range(steps):
             t_cur = step_times[i]
@@ -362,7 +364,7 @@ class MotionFlowMatching(BaseArchitecture):
             stick_encoder=precomputed["stick_encoder"],
             sample_idx=sample_idx,
         )
-        return x, index
+        return x, index, steps
 
     def _forward_test(
         self,
@@ -389,7 +391,7 @@ class MotionFlowMatching(BaseArchitecture):
             torch.cuda.synchronize(device)
         start_time = time.perf_counter()
 
-        pred_motion, pred_index = self._flow_solver(
+        pred_motion, pred_index, steps = self._flow_solver(
             x,
             motion_mask,
             motion_length,
@@ -413,6 +415,7 @@ class MotionFlowMatching(BaseArchitecture):
         results.pop("return_loss", None)
         results["pred_motion"] = pred_motion
         results["pred_index"] = pred_index
+        results["solver_steps"] = pred_motion.new_full((B,), float(steps))
         results["inference_time"] = pred_motion.new_full((B,), per_sample_time)
         return self.split_results(results)
 

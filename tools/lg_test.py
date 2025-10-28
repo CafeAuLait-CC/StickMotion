@@ -6,6 +6,7 @@ workspace_path = os.path.abspath(os.path.join(__file__, *['..']*2))
 os.chdir(workspace_path)
 sys.path.insert(0, workspace_path)
 from pathlib import Path
+import warnings
 import torch
 from torch.utils.data import DataLoader
 from mmcv import Config, ConfigDict, DictAction
@@ -30,12 +31,14 @@ torch.set_float32_matmul_precision('high')
 MODEL_CHOICES = ("diffusion", "flowmatching", "rectified", "meanflow")
 
 
-def apply_model_override(cfg, model_name):
+def apply_model_override(cfg, model_name, solver_steps=None):
     choice = model_name.lower()
     if choice not in MODEL_CHOICES:
         raise ValueError(f"Unsupported model '{model_name}'. Available: {MODEL_CHOICES}.")
 
     if choice == "diffusion":
+        if solver_steps is not None:
+            warnings.warn("'solver_steps' has no effect when selecting the diffusion model.", stacklevel=2)
         cfg.model.type = "MotionDiffusion"
         if hasattr(cfg.model, "pop"):
             cfg.model.pop("flow", None)
@@ -48,6 +51,9 @@ def apply_model_override(cfg, model_name):
         "rectified": "rectified",
         "meanflow": "meanflow",
     }
+
+    if solver_steps is not None and solver_steps <= 0:
+        raise ValueError("solver_steps must be positive if provided.")
 
     cfg.model.type = "MotionFlowMatching"
     flow_cfg = cfg.model.get("flow")
@@ -73,6 +79,17 @@ def apply_model_override(cfg, model_name):
     else:
         path_cfg.type = "rectified"
 
+    if solver_steps is not None:
+        solver_cfg = flow_cfg.get("solver")
+        if solver_cfg is None:
+            solver_cfg = ConfigDict()
+            flow_cfg.solver = solver_cfg
+        elif not isinstance(solver_cfg, ConfigDict):
+            solver_cfg = ConfigDict(solver_cfg)
+            flow_cfg.solver = solver_cfg
+        solver_cfg.num_steps = int(solver_steps)
+        solver_cfg.setdefault("type", "euler")
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description='test a ckpt')
@@ -88,6 +105,12 @@ def parse_args():
         choices=MODEL_CHOICES,
         default=None,
         help='Override the model family defined in the config.',
+    )
+    parser.add_argument(
+        '--solver-steps',
+        type=int,
+        default=None,
+        help='Override the number of ODE solver steps for flow-based models.',
     )
     args = parser.parse_args()
 
@@ -135,7 +158,29 @@ def main():
 
     cfg = Config.fromfile(config_path)
     if args.model is not None:
-        apply_model_override(cfg, args.model)
+        apply_model_override(cfg, args.model, solver_steps=args.solver_steps)
+    elif args.solver_steps is not None:
+        if args.solver_steps <= 0:
+            raise ValueError("--solver-steps must be positive.")
+        if getattr(cfg.model, 'type', '') == "MotionDiffusion":
+            warnings.warn("'--solver-steps' has no effect for diffusion configurations.", stacklevel=2)
+        else:
+            flow_cfg = cfg.model.get("flow")
+            if flow_cfg is None:
+                flow_cfg = ConfigDict()
+                cfg.model.flow = flow_cfg
+            elif not isinstance(flow_cfg, ConfigDict):
+                flow_cfg = ConfigDict(flow_cfg)
+                cfg.model.flow = flow_cfg
+            solver_cfg = flow_cfg.get("solver")
+            if solver_cfg is None:
+                solver_cfg = ConfigDict()
+                flow_cfg.solver = solver_cfg
+            elif not isinstance(solver_cfg, ConfigDict):
+                solver_cfg = ConfigDict(solver_cfg)
+                flow_cfg.solver = solver_cfg
+            solver_cfg.num_steps = int(args.solver_steps)
+            solver_cfg.setdefault("type", "euler")
     cfg.data.test.test_mode = True
     # set cudnn_benchmark
     if cfg.get('cudnn_benchmark', False):
@@ -160,6 +205,8 @@ def main():
     trainer.validate(model, test_loader, ckpt_path=args.ckpt)
     if getattr(model, 'last_aits', None) is not None:
         print(f'\nAverage inference time per sample: {model.last_aits:.6f}s')
+    if getattr(model, 'last_solver_steps', None) is not None:
+        print(f'Average solver steps: {model.last_solver_steps:.2f}')
 
 
 if __name__ == '__main__':

@@ -7,6 +7,7 @@ import os.path as osp
 import time
 
 import shutil
+import warnings
 from pathlib import Path
 import mmcv
 import torch
@@ -43,7 +44,7 @@ class UnParaCallback(Callback):
 MODEL_CHOICES = ("diffusion", "flowmatching", "rectified", "meanflow")
 
 
-def apply_model_override(cfg, model_name):
+def apply_model_override(cfg, model_name, solver_steps=None):
     """Mutate the config so it instantiates the requested model."""
 
     choice = model_name.lower()
@@ -51,6 +52,8 @@ def apply_model_override(cfg, model_name):
         raise ValueError(f"Unsupported model '{model_name}'. Available: {MODEL_CHOICES}.")
 
     if choice == "diffusion":
+        if solver_steps is not None:
+            warnings.warn("'solver_steps' has no effect when selecting the diffusion model.", stacklevel=2)
         cfg.model.type = "MotionDiffusion"
         if hasattr(cfg.model, "pop"):
             cfg.model.pop("flow", None)
@@ -64,6 +67,9 @@ def apply_model_override(cfg, model_name):
         "rectified": "rectified",
         "meanflow": "meanflow",
     }
+
+    if solver_steps is not None and solver_steps <= 0:
+        raise ValueError("solver_steps must be positive if provided.")
 
     cfg.model.type = "MotionFlowMatching"
     flow_cfg = cfg.model.get("flow")
@@ -90,6 +96,17 @@ def apply_model_override(cfg, model_name):
         # Rectified and meanflow defaults share the rectified schedule.
         path_cfg.type = "rectified"
 
+    if solver_steps is not None:
+        solver_cfg = flow_cfg.get("solver")
+        if solver_cfg is None:
+            solver_cfg = ConfigDict()
+            flow_cfg.solver = solver_cfg
+        elif not isinstance(solver_cfg, ConfigDict):
+            solver_cfg = ConfigDict(solver_cfg)
+            flow_cfg.solver = solver_cfg
+        solver_cfg.num_steps = int(solver_steps)
+        solver_cfg.setdefault("type", "euler")
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Train a model')
@@ -101,6 +118,12 @@ def parse_args():
         choices=MODEL_CHOICES,
         default=None,
         help='Override the model family defined in the config.',
+    )
+    parser.add_argument(
+        '--solver-steps',
+        type=int,
+        default=None,
+        help='Override the number of ODE solver steps for flow-based models.',
     )
     args = parser.parse_args()
 
@@ -139,7 +162,29 @@ def main():
     cfg = Config.fromfile(args.config)
     # optionally override the model family
     if args.model is not None:
-        apply_model_override(cfg, args.model)
+        apply_model_override(cfg, args.model, solver_steps=args.solver_steps)
+    elif args.solver_steps is not None:
+        if args.solver_steps <= 0:
+            raise ValueError("--solver-steps must be positive.")
+        if getattr(cfg.model, 'type', '') == "MotionDiffusion":
+            warnings.warn("'--solver-steps' has no effect for diffusion configurations.", stacklevel=2)
+        else:
+            flow_cfg = cfg.model.get("flow")
+            if flow_cfg is None:
+                flow_cfg = ConfigDict()
+                cfg.model.flow = flow_cfg
+            elif not isinstance(flow_cfg, ConfigDict):
+                flow_cfg = ConfigDict(flow_cfg)
+                cfg.model.flow = flow_cfg
+            solver_cfg = flow_cfg.get("solver")
+            if solver_cfg is None:
+                solver_cfg = ConfigDict()
+                flow_cfg.solver = solver_cfg
+            elif not isinstance(solver_cfg, ConfigDict):
+                solver_cfg = ConfigDict(solver_cfg)
+                flow_cfg.solver = solver_cfg
+            solver_cfg.num_steps = int(args.solver_steps)
+            solver_cfg.setdefault("type", "euler")
 
     # set cudnn_benchmark
     if cfg.get('cudnn_benchmark', False):

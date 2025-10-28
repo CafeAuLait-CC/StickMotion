@@ -122,6 +122,8 @@ class BaseArchitecture(BaseModule):
             batch_output['motion_mask'] = to_cpu(results['motion_mask'][i])
             if 'inference_time' in results:
                 batch_output['inference_time'] = float(to_cpu(results['inference_time'][i]))
+            if 'solver_steps' in results:
+                batch_output['solver_steps'] = float(to_cpu(results['solver_steps'][i]))
             if 'pred_motion_length' in results.keys():
                 batch_output['pred_motion_length'] = to_cpu(results['pred_motion_length'][i])
             else:
