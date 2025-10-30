@@ -1,3 +1,5 @@
+import time
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -87,6 +89,7 @@ class MotionDiffusion(BaseArchitecture):
         self.motion_start = motion_crop[0]
         self.motion_end = motion_crop[1]
         self.index_num = index_num
+        self.last_solver_steps = None
         
     def others_cuda(self):
         device = [v for k,v in self.model.named_parameters()][0].device
@@ -159,11 +162,16 @@ class MotionDiffusion(BaseArchitecture):
             return loss
         else:
             dim_pose = kwargs['motion'].shape[-1]
+            if motion.device.type == "cuda":
+                torch.cuda.synchronize(motion.device)
+            start_time = time.perf_counter()
+
             model_kwargs = self.model.get_precompute_condition(device=motion.device,  **kwargs)
             model_kwargs['motion_mask'] = motion_mask
             model_kwargs['sample_idx'] = sample_idx
             model_kwargs['motion_length'] = kwargs['motion_length']
             inference_kwargs = kwargs.get('inference_kwargs', {})
+
             if self.inference_type == 'ddpm':
                 output = self.diffusion_test.p_sample_loop(
                     self.model,
@@ -185,9 +193,22 @@ class MotionDiffusion(BaseArchitecture):
                 )
             if getattr(self.model, "post_process") is not None:
                 output = self.model.post_process(output)
+            if motion.device.type == "cuda":
+                torch.cuda.synchronize(motion.device)
+            elapsed = time.perf_counter() - start_time
+            per_sample_time = elapsed / max(B, 1)
             results = kwargs
+            steps = getattr(self.diffusion_test, 'num_timesteps', None)
+            if steps is not None:
+                self.last_solver_steps = float(steps)
+                step_tensor = output["sample"].new_full((B,), float(steps))
+            else:
+                self.last_solver_steps = None
+                step_tensor = output["sample"].new_full((B,), 0.0)
             results['pred_motion'] = output["sample"]
             results['pred_index'] = output["index"]
+            results['solver_steps'] = step_tensor
+            results['inference_time'] = output["sample"].new_full((B,), per_sample_time)
             results = self.split_results(results)
             return results
 

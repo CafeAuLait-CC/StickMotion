@@ -58,6 +58,7 @@ workflow = [('train', 1)]
 
 # optimizer
 optimizer = dict(type='Adam', lr=2e-4)
+lr_scheduler = dict(milestone_ratios=[0.5, 5/6], gamma=0.1)
 optimizer_config = dict(grad_clip=None)
 # learning policy
 # lr_config = dict(policy='CosineAnnealing', min_lr_ratio=0, by_epoch=False)
@@ -82,7 +83,7 @@ index_num = 3
 
 # model settings
 model = dict(
-    type='MotionDiffusion',
+    type='MotionFlowMatching',
     loss_weight=dict(
         # motion_w=0,
         # index_w=0
@@ -91,6 +92,27 @@ model = dict(
     ),
     index_num=index_num,
     motion_crop=[4, 21*3+4],
+    flow=dict(
+        kind='rectified',
+        time_scale=1000,
+        path=dict(
+            type='rectified',
+            exponent=2.0,
+            epsilon=1e-4,
+        ),
+        objective=dict(
+            motion=1.0,
+            velocity=1.0,
+        ),
+        variance=dict(
+            type='alpha',
+            floor=1e-4,
+        ),
+        solver=dict(
+            type='heun',
+            num_steps=60,
+        ),
+    ),
     model=dict(
         type='ReMoDiffuseTransformer',
         input_feats=input_feats,

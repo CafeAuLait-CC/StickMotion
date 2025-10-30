@@ -1,3 +1,5 @@
+from collections import Counter
+
 import torch
 import torch.optim as optim
 from mogen.core.optimizer.builder import build_optimizers
@@ -18,6 +20,8 @@ class LgModel(LightningModule):
         self.dataset = dataset
         self.outputs = []
         self.unit = unit
+        self.last_aits = None
+        self.last_solver_steps = None
 
     
     def on_train_epoch_start(self) -> None:
@@ -31,9 +35,36 @@ class LgModel(LightningModule):
 
     def configure_optimizers(self):
         optimizer = build_optimizers(self.model, self.cfg.optimizer)
-        # lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=self.trainer.max_epochs*2)
-        milestone = 5/6 * self.trainer.max_epochs
-        lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[milestone], gamma=0.1)
+
+        scheduler_cfg = getattr(self.cfg, 'lr_scheduler', None)
+        if scheduler_cfg is None:
+            milestone_ratios = [5 / 6]
+            gamma = 0.1
+            raw_milestones = [ratio * self.trainer.max_epochs for ratio in milestone_ratios]
+        else:
+            gamma = scheduler_cfg.get('gamma', 0.1)
+            if 'milestones' in scheduler_cfg:
+                raw_milestones = scheduler_cfg['milestones']
+            else:
+                milestone_ratios = scheduler_cfg.get('milestone_ratios', [5 / 6])
+                raw_milestones = [ratio * self.trainer.max_epochs for ratio in milestone_ratios]
+
+        milestones = sorted(
+            {
+                int(round(milestone))
+                for milestone in raw_milestones
+                if 0 < milestone < self.trainer.max_epochs
+            }
+        )
+
+        if not milestones:
+            return [optimizer], []
+
+        lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(
+            optimizer,
+            milestones=milestones,
+            gamma=gamma,
+        )
         return [optimizer], [lr_scheduler]
 
     def training_step(self, batch, batch_idx):
@@ -68,7 +99,31 @@ class LgModel(LightningModule):
                 ordered_results.extend(list(res))
             ordered_results = ordered_results[:len(self.dataset)]
             print(f'StiSim:{1-evalute_sim(ordered_results, joints_num=21)/evalute_mean(ordered_results, joints_num=21)}')
+            inference_times = [res.get('inference_time', 0.0) for res in ordered_results if 'inference_time' in res]
+            avg_inference = sum(inference_times) / len(inference_times) if inference_times else 0.0
+            if inference_times:
+                print(f'\nAITS : {avg_inference:.6f}s')
+                self.last_aits = avg_inference
+            else:
+                self.last_aits = None
+            solver_steps = [res.get('solver_steps') for res in ordered_results if 'solver_steps' in res]
+            solver_evals = [res.get('solver_evals') for res in ordered_results if 'solver_evals' in res]
+            solver_types = [res.get('solver_type') for res in ordered_results if 'solver_type' in res]
+            if solver_steps:
+                avg_steps = sum(solver_steps) / len(solver_steps)
+                print(f'\nAverage solver steps : {avg_steps:.2f}')
+                self.last_solver_steps = avg_steps
+            else:
+                self.last_solver_steps = None
+            if solver_evals:
+                avg_evals = sum(solver_evals) / len(solver_evals)
+                print(f'Average solver evaluations : {avg_evals:.2f}')
+            if solver_types:
+                primary_type = Counter(solver_types).most_common(1)[0][0]
+                print(f'Solver type : {primary_type}')
             results = self.dataset.evaluate(ordered_results)
+            if inference_times:
+                results['AITS'] = avg_inference
             for k, v in results.items():
                 print(f'\n{k} : {v:.4f}')
 
