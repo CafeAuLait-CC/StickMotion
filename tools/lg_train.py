@@ -7,11 +7,12 @@ import os.path as osp
 import time
 
 import shutil
+import warnings
 from pathlib import Path
 import mmcv
 import torch
 from torch.utils.data import DataLoader
-from mmcv import Config, DictAction
+from mmcv import Config, ConfigDict, DictAction
 from mmcv.runner import get_dist_info, init_dist
 
 from mogen import __version__
@@ -40,11 +41,90 @@ class UnParaCallback(Callback):
             if param.grad is None:
                 print(name)
                 
+MODEL_CHOICES = ("diffusion", "flowmatching", "rectified", "meanflow")
+
+
+def apply_model_override(cfg, model_name, solver_steps=None):
+    """Mutate the config so it instantiates the requested model."""
+
+    choice = model_name.lower()
+    if choice not in MODEL_CHOICES:
+        raise ValueError(f"Unsupported model '{model_name}'. Available: {MODEL_CHOICES}.")
+
+    if choice == "diffusion":
+        if solver_steps is not None:
+            warnings.warn("'solver_steps' has no effect when selecting the diffusion model.", stacklevel=2)
+        cfg.model.type = "MotionDiffusion"
+        if hasattr(cfg.model, "pop"):
+            cfg.model.pop("flow", None)
+        elif "flow" in cfg.model:
+            del cfg.model["flow"]
+        return
+
+    # Flow-based variants share the MotionFlowMatching architecture.
+    flow_kind_map = {
+        "flowmatching": "linear",
+        "rectified": "rectified",
+        "meanflow": "meanflow",
+    }
+
+    if solver_steps is not None and solver_steps <= 0:
+        raise ValueError("solver_steps must be positive if provided.")
+
+    cfg.model.type = "MotionFlowMatching"
+    flow_cfg = cfg.model.get("flow")
+    if flow_cfg is None:
+        flow_cfg = ConfigDict()
+        cfg.model.flow = flow_cfg
+    elif not isinstance(flow_cfg, ConfigDict):
+        flow_cfg = ConfigDict(flow_cfg)
+        cfg.model.flow = flow_cfg
+
+    flow_cfg.kind = flow_kind_map[choice]
+
+    path_cfg = flow_cfg.get("path")
+    if path_cfg is None:
+        path_cfg = ConfigDict()
+        flow_cfg.path = path_cfg
+    elif not isinstance(path_cfg, ConfigDict):
+        path_cfg = ConfigDict(path_cfg)
+        flow_cfg.path = path_cfg
+
+    if flow_cfg.kind == "linear":
+        path_cfg.type = "linear"
+    else:
+        # Rectified and meanflow defaults share the rectified schedule.
+        path_cfg.type = "rectified"
+
+    if solver_steps is not None:
+        solver_cfg = flow_cfg.get("solver")
+        if solver_cfg is None:
+            solver_cfg = ConfigDict()
+            flow_cfg.solver = solver_cfg
+        elif not isinstance(solver_cfg, ConfigDict):
+            solver_cfg = ConfigDict(solver_cfg)
+            flow_cfg.solver = solver_cfg
+        solver_cfg.num_steps = int(solver_steps)
+        solver_cfg.setdefault("type", "euler")
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description='Train a model')
     parser.add_argument('config', help='train config file path')
     parser.add_argument('version', help='the version to save logs and models')
     parser.add_argument('gpu', help='-1: 0,1,2,3; -2: 4,5,6,7; else: set to gpu directly')
+    parser.add_argument(
+        '--model',
+        choices=MODEL_CHOICES,
+        default=None,
+        help='Override the model family defined in the config.',
+    )
+    parser.add_argument(
+        '--solver-steps',
+        type=int,
+        default=None,
+        help='Override the number of ODE solver steps for flow-based models.',
+    )
     args = parser.parse_args()
 
     return args
@@ -80,6 +160,32 @@ def main():
     # seed_everything(123)
 
     cfg = Config.fromfile(args.config)
+    # optionally override the model family
+    if args.model is not None:
+        apply_model_override(cfg, args.model, solver_steps=args.solver_steps)
+    elif args.solver_steps is not None:
+        if args.solver_steps <= 0:
+            raise ValueError("--solver-steps must be positive.")
+        if getattr(cfg.model, 'type', '') == "MotionDiffusion":
+            warnings.warn("'--solver-steps' has no effect for diffusion configurations.", stacklevel=2)
+        else:
+            flow_cfg = cfg.model.get("flow")
+            if flow_cfg is None:
+                flow_cfg = ConfigDict()
+                cfg.model.flow = flow_cfg
+            elif not isinstance(flow_cfg, ConfigDict):
+                flow_cfg = ConfigDict(flow_cfg)
+                cfg.model.flow = flow_cfg
+            solver_cfg = flow_cfg.get("solver")
+            if solver_cfg is None:
+                solver_cfg = ConfigDict()
+                flow_cfg.solver = solver_cfg
+            elif not isinstance(solver_cfg, ConfigDict):
+                solver_cfg = ConfigDict(solver_cfg)
+                flow_cfg.solver = solver_cfg
+            solver_cfg.num_steps = int(args.solver_steps)
+            solver_cfg.setdefault("type", "euler")
+
     # set cudnn_benchmark
     if cfg.get('cudnn_benchmark', False):
         torch.backends.cudnn.benchmark = True
