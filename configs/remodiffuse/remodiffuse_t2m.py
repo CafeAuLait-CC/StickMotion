@@ -103,7 +103,7 @@ model = dict(
             floor=1e-4,
         ),
         solver=dict(
-            type='euler',
+            type='heun',
             num_steps=60,
         ),
     ),

@@ -1,3 +1,5 @@
+from collections import Counter
+
 import torch
 import torch.optim as optim
 from mogen.core.optimizer.builder import build_optimizers
@@ -105,12 +107,20 @@ class LgModel(LightningModule):
             else:
                 self.last_aits = None
             solver_steps = [res.get('solver_steps') for res in ordered_results if 'solver_steps' in res]
+            solver_evals = [res.get('solver_evals') for res in ordered_results if 'solver_evals' in res]
+            solver_types = [res.get('solver_type') for res in ordered_results if 'solver_type' in res]
             if solver_steps:
                 avg_steps = sum(solver_steps) / len(solver_steps)
                 print(f'\nAverage solver steps : {avg_steps:.2f}')
                 self.last_solver_steps = avg_steps
             else:
                 self.last_solver_steps = None
+            if solver_evals:
+                avg_evals = sum(solver_evals) / len(solver_evals)
+                print(f'Average solver evaluations : {avg_evals:.2f}')
+            if solver_types:
+                primary_type = Counter(solver_types).most_common(1)[0][0]
+                print(f'Solver type : {primary_type}')
             results = self.dataset.evaluate(ordered_results)
             if inference_times:
                 results['AITS'] = avg_inference

@@ -78,6 +78,10 @@ class MotionFlowMatching(BaseArchitecture):
 
         self.default_solver_steps = int(solver.get("num_steps", 50))
         self.default_solver_type = solver.get("type", "euler").lower()
+        if self.default_solver_type not in {"euler", "heun"}:
+            raise ValueError(
+                "Unsupported solver type '{}'".format(self.default_solver_type)
+            )
 
         # cache stickman geometry for default fallbacks during inference
         if hasattr(self.model, "multistick_encoder"):
@@ -143,6 +147,37 @@ class MotionFlowMatching(BaseArchitecture):
             variance = 1.0 - alpha
         variance = torch.clamp(variance, min=self.variance_floor)
         return variance.sqrt()
+
+    def _sigma_and_derivative(self, alpha, alpha_dot):
+        """Return ``sigma`` and ``dsigma/dt`` under the current variance rule."""
+        if self.variance_type == "alpha":
+            variance = 1.0 - alpha.pow(2)
+            sigma = torch.sqrt(torch.clamp(variance, min=self.variance_floor))
+            raw_derivative = -2.0 * alpha * alpha_dot
+        else:
+            variance = 1.0 - alpha
+            sigma = torch.sqrt(torch.clamp(variance, min=self.variance_floor))
+            raw_derivative = -alpha_dot
+
+        # When the variance has been clamped to the floor we treat the path as
+        # stationary (``sigma`` constant), preventing large derivatives caused
+        # by tiny denominators.  Otherwise convert ``d(variance)/dt`` into
+        # ``d(sigma)/dt`` using the chain rule.
+        if torch.is_tensor(variance):
+            active = variance > self.variance_floor + 1e-12
+            safe_sigma = torch.where(active, sigma, torch.ones_like(sigma))
+            sigma_dot = torch.where(
+                active,
+                0.5 * raw_derivative / safe_sigma,
+                torch.zeros_like(alpha_dot),
+            )
+        else:
+            if variance > self.variance_floor + 1e-12:
+                sigma_dot = 0.5 * raw_derivative / sigma
+            else:
+                sigma_dot = 0.0
+
+        return sigma, sigma_dot
 
     # ------------------------------------------------------------------
     # core forward
@@ -228,7 +263,9 @@ class MotionFlowMatching(BaseArchitecture):
         alpha_dot = self._alpha_dot(t)
 
         if self.flow_kind == "meanflow":
-            sigma = self._sigma(alpha)[:, None, None]
+            sigma, sigma_dot = self._sigma_and_derivative(alpha, alpha_dot)
+            sigma = sigma[:, None, None]
+            sigma_dot = sigma_dot[:, None, None]
             xt = alpha[:, None, None] * motion + sigma * base_sample
         else:
             xt = (1.0 - alpha)[:, None, None] * base_sample + alpha[:, None, None] * motion
@@ -248,9 +285,18 @@ class MotionFlowMatching(BaseArchitecture):
         )
 
         if self.flow_kind == "meanflow":
-            pred_motion = xt + pred_velocity
-            target = alpha[:, None, None] * motion
-            target_velocity = target - xt
+            alpha_dot = alpha_dot[:, None, None]
+            denom = torch.where(
+                alpha_dot.abs() < self.alpha_dot_floor,
+                alpha_dot.new_full(alpha_dot.shape, self.alpha_dot_floor),
+                alpha_dot,
+            )
+            # MeanFlow trains the network to reproduce the analytical velocity
+            # of the rectified variance path.  Reconstruct motions by removing
+            # the stochastic component and normalising by ``alphȧ``.
+            pred_motion = (pred_velocity - sigma_dot * base_sample) / denom
+            target = motion
+            target_velocity = alpha_dot * motion + sigma_dot * base_sample
         else:
             alpha_dot = alpha_dot[:, None, None]
             denom = torch.where(
@@ -324,7 +370,7 @@ class MotionFlowMatching(BaseArchitecture):
         steps = int(solver_cfg.get("num_steps", self.default_solver_steps))
         if steps <= 0:
             raise ValueError("Number of solver steps must be positive.")
-        if method != "euler":
+        if method not in {"euler", "heun"}:
             raise NotImplementedError(f"Solver '{method}' is not supported yet.")
 
         if motion_mask.dim() == 2:
@@ -342,6 +388,7 @@ class MotionFlowMatching(BaseArchitecture):
         )
         self.last_solver_steps = steps
         step_times = torch.linspace(0.0, 1.0, steps + 1, device=device)
+        total_evals = 0
         for i in range(steps):
             t_cur = step_times[i]
             t_next = step_times[i + 1]
@@ -356,9 +403,27 @@ class MotionFlowMatching(BaseArchitecture):
                 stick_encoder=precomputed["stick_encoder"],
                 sample_idx=sample_idx,
             )
+            total_evals += 1
             if mask is not None:
                 velocity = velocity * mask
-            x = x + dt * velocity
+            if method == "heun":
+                x_pred = x + dt * velocity
+                t_next_batch = torch.full((x.shape[0],), self._scale_time(t_next), device=device)
+                velocity_next, _ = self.model(
+                    x_pred,
+                    t_next_batch,
+                    motion_mask=motion_mask,
+                    motion_length=motion_length,
+                    xf_out=precomputed["xf_out"],
+                    stick_encoder=precomputed["stick_encoder"],
+                    sample_idx=sample_idx,
+                )
+                total_evals += 1
+                if mask is not None:
+                    velocity_next = velocity_next * mask
+                x = x + dt * 0.5 * (velocity + velocity_next)
+            else:
+                x = x + dt * velocity
         final_t = torch.full((x.shape[0],), self.time_scale, device=device)
         _, index = self.model(
             x,
@@ -369,7 +434,8 @@ class MotionFlowMatching(BaseArchitecture):
             stick_encoder=precomputed["stick_encoder"],
             sample_idx=sample_idx,
         )
-        return x, index, steps
+        total_evals += 1
+        return x, index, steps, total_evals, method
 
     def _forward_test(
         self,
@@ -396,7 +462,7 @@ class MotionFlowMatching(BaseArchitecture):
             torch.cuda.synchronize(device)
         start_time = time.perf_counter()
 
-        pred_motion, pred_index, steps = self._flow_solver(
+        pred_motion, pred_index, steps, total_evals, solver_type = self._flow_solver(
             x,
             motion_mask,
             motion_length,
@@ -421,6 +487,8 @@ class MotionFlowMatching(BaseArchitecture):
         results["pred_motion"] = pred_motion
         results["pred_index"] = pred_index
         results["solver_steps"] = pred_motion.new_full((B,), float(steps))
+        results["solver_evals"] = pred_motion.new_full((B,), float(total_evals))
+        results["solver_type"] = [solver_type] * B
         results["inference_time"] = pred_motion.new_full((B,), per_sample_time)
         return self.split_results(results)
 
